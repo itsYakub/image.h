@@ -129,12 +129,34 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height, int *channe
         /* IHDR: header */
         if (!memcmp(f_type, "IHDR", 4)) {
             png.ihdr.width = __pack(&f_data[0]);
+            if (!png.ihdr.width) { break; }
+
             png.ihdr.height = __pack(&f_data[4]);
+            if (!png.ihdr.height) { break; }
+
             png.ihdr.bit = f_data[8];
+            if (png.ihdr.bit != 1 &&
+                png.ihdr.bit != 2 &&
+                png.ihdr.bit != 4 &&
+                png.ihdr.bit != 8 &&
+                png.ihdr.bit != 16) { break; }
+
             png.ihdr.type = f_data[9];
+            if (png.ihdr.type != 0 &&
+                png.ihdr.type != 2 &&
+                png.ihdr.type != 3 &&
+                png.ihdr.type != 4 &&
+                png.ihdr.type != 6) { break; }
+
             png.ihdr.comp = f_data[10];
+            if (png.ihdr.comp) { break; }
+
             png.ihdr.filter = f_data[11];
+            if (png.ihdr.filter) { break; }
+
             png.ihdr.interlane = f_data[12];
+            if (png.ihdr.type != 0 &&
+                png.ihdr.type != 1) { break; }
         }
         
         /* PLTE: palette */
