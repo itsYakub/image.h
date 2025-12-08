@@ -92,8 +92,6 @@ static const uint8_t g_sign_png[] = { 137, 80, 78, 71, 13, 10, 26, 10 };
  * */
 
 struct s_png {
-    uint8_t *data;
-
     struct {
         uint32_t width;
         uint32_t height;
@@ -114,6 +112,10 @@ struct s_png {
         uint8_t *data;
         size_t   size;
     } idat;
+
+    struct {
+        uint8_t *data;
+    } iend;
 };
 
 struct s_chunk {
@@ -195,7 +197,7 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
 
     if (width)  { *width  = png.ihdr.width;  }
     if (height) { *height = png.ihdr.height; }
-    return (png.data);
+    return (png.iend.data);
 
 __failure:
     
