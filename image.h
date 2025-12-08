@@ -84,6 +84,50 @@ struct s_png {
     struct { } idat;
 };
 
+struct s_zlib {
+    uint8_t *data;
+    uint16_t check;
+    uint8_t cmf;
+    uint8_t flags;
+};
+
+static inline int __ihdr(struct s_png *png, const uint8_t *data) {
+    if (!png)  { return (0); }
+    if (!data) { return (0); }
+
+    png->ihdr.width = __pack((int8_t *) &data[0]);
+    if (!png->ihdr.width) { return (0); }
+
+    png->ihdr.height = __pack((int8_t *) &data[4]);
+    if (!png->ihdr.height) { return (0); }
+
+    png->ihdr.bit = data[8];
+    if (png->ihdr.bit != 1 &&
+        png->ihdr.bit != 2 &&
+        png->ihdr.bit != 4 &&
+        png->ihdr.bit != 8 &&
+        png->ihdr.bit != 16) { return (0); }
+
+    png->ihdr.type = data[9];
+    if (png->ihdr.type != 0 &&
+        png->ihdr.type != 2 &&
+        png->ihdr.type != 3 &&
+        png->ihdr.type != 4 &&
+        png->ihdr.type != 6) { return (0); }
+
+    png->ihdr.comp = data[10];
+    if (png->ihdr.comp) { return (0); }
+
+    png->ihdr.filter = data[11];
+    if (png->ihdr.filter) { return (0); }
+
+    png->ihdr.interlane = data[12];
+    if (png->ihdr.interlane != 0 &&
+        png->ihdr.interlane != 1) { return (0); }
+
+    return (1);
+}
+
 IMGAPI void *imageLoadPNG(const char *path, int *width, int *height, int *channel, const int desired) {
     if (!path)  { return (0); }
     if (!*path) { return (0); }
@@ -128,45 +172,20 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height, int *channe
 
         /* IHDR: header */
         if (!memcmp(f_type, "IHDR", 4)) {
-            png.ihdr.width = __pack(&f_data[0]);
-            if (!png.ihdr.width) { break; }
-
-            png.ihdr.height = __pack(&f_data[4]);
-            if (!png.ihdr.height) { break; }
-
-            png.ihdr.bit = f_data[8];
-            if (png.ihdr.bit != 1 &&
-                png.ihdr.bit != 2 &&
-                png.ihdr.bit != 4 &&
-                png.ihdr.bit != 8 &&
-                png.ihdr.bit != 16) { break; }
-
-            png.ihdr.type = f_data[9];
-            if (png.ihdr.type != 0 &&
-                png.ihdr.type != 2 &&
-                png.ihdr.type != 3 &&
-                png.ihdr.type != 4 &&
-                png.ihdr.type != 6) { break; }
-
-            png.ihdr.comp = f_data[10];
-            if (png.ihdr.comp) { break; }
-
-            png.ihdr.filter = f_data[11];
-            if (png.ihdr.filter) { break; }
-
-            png.ihdr.interlane = f_data[12];
-            if (png.ihdr.type != 0 &&
-                png.ihdr.type != 1) { break; }
+            printf("IHDR: %ld\n", length);
+            if (!__ihdr(&png, f_data)) {
+                break;
+            }
         }
         
         /* PLTE: palette */
         else if (!memcmp(f_type, "PLTE", 4)) {
-
+            printf("PLTE: %ld\n", length);
         }
         
         /* IDAT: data */
         else if (!memcmp(f_type, "IDAT", 4)) {
-
+            printf("IDAT: %ld\n", length);
         }
 
         /* OTHER: ancillary */
