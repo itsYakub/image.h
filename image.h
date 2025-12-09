@@ -79,8 +79,6 @@ static inline void *__memcpy(void *dst, const void *src, size_t n) {
     return (dst);
 }
 
-
-
 /* SECTION: global objects
  * */
 
@@ -136,6 +134,15 @@ struct s_iend {
 
 static inline int __iend(struct s_png *);
 
+struct s_zlib {
+    uint8_t *data;
+    uint8_t  flags;
+    uint8_t  cmf;
+    uint16_t check;
+};
+
+static inline int __zlib_read(struct s_png *);
+
 struct s_png {
     struct s_ihdr ihdr;
     struct s_plte plte;
@@ -190,8 +197,50 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
         }
 
         /* OTHER: ancillary */
-        else { }
-    
+        else {
+            /* tRNS: transparency */
+            if (!__memcmp(chunk.type, "tRNS", 4)) { }
+
+            /* gAMA: gamma */
+            else if (!__memcmp(chunk.type, "gAMA", 4)) { }
+
+            /* cHRM: chromaticities */
+            else if (!__memcmp(chunk.type, "cHRM", 4)) { }
+
+            /* sRGB: RGB color space */
+            else if (!__memcmp(chunk.type, "sRGB", 4)) { }
+
+            /* iCCP: embedded ICC profile */
+            else if (!__memcmp(chunk.type, "iCCP", 4)) { }
+
+            /* tEXt: textual data */
+            else if (!__memcmp(chunk.type, "tEXt", 4)) { }
+
+            /* zTXt: textual data (compressed) */
+            else if (!__memcmp(chunk.type, "zTXt", 4)) { }
+
+            /* iTXt: textual data (international) */
+            else if (!__memcmp(chunk.type, "iTXt", 4)) { }
+
+            /* bKGD: background color */
+            else if (!__memcmp(chunk.type, "bKGD", 4)) { }
+
+            /* pHYs: physical pixel dimensions */
+            else if (!__memcmp(chunk.type, "pHYs", 4)) { }
+
+            /* sBIT: significant bits */
+            else if (!__memcmp(chunk.type, "sBIT", 4)) { }
+
+            /* sPLT: suggested palette */
+            else if (!__memcmp(chunk.type, "sPLT", 4)) { }
+
+            /* hIST: palette histogram */
+            else if (!__memcmp(chunk.type, "hIST", 4)) { }
+
+            /* tIME: image timestamp (last modification) */
+            else if (!__memcmp(chunk.type, "tIME", 4)) { }
+        }
+
         if (chunk.data) { free(chunk.data), chunk.data = 0; }
     }
     
@@ -318,19 +367,26 @@ static inline int __idat(struct s_png *png, struct s_chunk *chunk) {
            length1 = __pack(chunk->length);
     if (!length1) { return (0); }
 
-    uint8_t *data = malloc((length0 + length1) * sizeof(uint8_t));
+    uint8_t *data = realloc(png->idat.data, (length0 + length1) * sizeof(uint8_t));
     if (!data) { return (0); }
-
-    if (!__memcpy(data, png->idat.data, length0)) { return (0); }
     if (!__memcpy(&data[length0], chunk->data, length1)) { return (0); }
-    free(png->idat.data);
-    
+
     png->idat.data = data;
     png->idat.size += length1;
     return (1);
 }
 
 static inline int __iend(struct s_png *png) {
+    /* null-check...
+     * */
+    if (!png) { return (0); }
+
+    /* ... */
+
+    return (1);
+}
+
+static inline int __zlib_read(struct s_png *png) {
     /* null-check...
      * */
     if (!png) { return (0); }
