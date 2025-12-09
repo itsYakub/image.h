@@ -91,32 +91,7 @@ static const uint8_t g_sign_png[] = { 137, 80, 78, 71, 13, 10, 26, 10 };
 /* SECTION: image.h api (.png)
  * */
 
-struct s_png {
-    struct {
-        uint32_t width;
-        uint32_t height;
-
-        uint8_t bit;
-        uint8_t type;
-        uint8_t comp;
-        uint8_t filter;
-        uint8_t interlane;
-    } ihdr;
-
-    struct {
-        uint8_t palette[256 * 4];
-        size_t  length;
-    } plte;
-
-    struct {
-        uint8_t *data;
-        size_t   size;
-    } idat;
-
-    struct {
-        uint8_t *data;
-    } iend;
-};
+struct s_png;
 
 struct s_chunk {
     uint8_t *data;
@@ -126,10 +101,47 @@ struct s_chunk {
 };
 
 static inline int __chunk(FILE *, struct s_chunk *);
+
+struct s_ihdr {
+    uint32_t width;
+    uint32_t height;
+
+    uint8_t bit;
+    uint8_t type;
+    uint8_t comp;
+    uint8_t filter;
+    uint8_t interlane;
+};
+
 static inline int __ihdr(struct s_png *, struct s_chunk *);
+
+struct s_plte {
+    uint8_t data[256 * 4];
+    size_t  size;
+};
+
 static inline int __plte(struct s_png *, struct s_chunk *);
+
+struct s_idat {
+    uint8_t *data;
+    size_t   size;
+};
+
 static inline int __idat(struct s_png *, struct s_chunk *);
+
+struct s_iend {
+    uint8_t *data;
+    size_t   size;
+};
+
 static inline int __iend(struct s_png *);
+
+struct s_png {
+    struct s_ihdr ihdr;
+    struct s_plte plte;
+    struct s_idat idat;
+    struct s_iend iend;
+};
 
 
 
@@ -283,14 +295,14 @@ static inline int __plte(struct s_png *png, struct s_chunk *chunk) {
     size_t length = __pack(chunk->length);
     if (length > 256 * 3) { return (0); }
     
-    png->plte.length = length / 3.0;
-    if (png->plte.length * 3 != length) { return (0); }
+    png->plte.size = length / 3.0;
+    if (png->plte.size * 3 != length) { return (0); }
 
-    for (size_t i = 0; i < png->plte.length; i++) {
-        png->plte.palette[i * 4 + 0] = chunk->data[i * 3 + 0];
-        png->plte.palette[i * 4 + 1] = chunk->data[i * 3 + 1];
-        png->plte.palette[i * 4 + 2] = chunk->data[i * 3 + 2];
-        png->plte.palette[i * 4 + 3] = 255;
+    for (size_t i = 0; i < png->plte.size; i++) {
+        png->plte.data[i * 4 + 0] = chunk->data[i * 3 + 0];
+        png->plte.data[i * 4 + 1] = chunk->data[i * 3 + 1];
+        png->plte.data[i * 4 + 2] = chunk->data[i * 3 + 2];
+        png->plte.data[i * 4 + 3] = 255;
     }
 
     return (1);
