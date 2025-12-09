@@ -79,6 +79,71 @@ static inline void *__memcpy(void *dst, const void *src, size_t n) {
     return (dst);
 }
 
+struct s_file {
+    uint8_t *data0, /* original pointer   */
+            *data1; /* modifiable pointer */
+
+    size_t   size;
+};
+
+static inline int __readf(struct s_file *fs, FILE *f) {
+    /* Null-check...
+     * */
+    if (!fs) { return (0); }
+    if (!f)  { return (0); }
+
+    fseek(f, 0, SEEK_END);
+    size_t size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (!size) { return (0); }
+
+    uint8_t *data = malloc(size);
+    if (!data) { return (0); }
+    if (fread(data, sizeof(uint8_t), size, f) != size) { free(data); return (0); }
+
+    fs->data0 = data;
+    fs->data1 = data;
+    fs->size  = size;
+    return (1);
+}
+
+static inline int __skipf(struct s_file *fs, const size_t n) {
+    /* Null-check...
+     * */
+    if (!fs)        { return (0); }
+    if (!fs->data0) { return (0); }
+    if (!fs->data1) { return (0); }
+    if (!n)         { return (0); }
+
+    /* Check if we've exhausted the file buffer...
+     * */
+    if ((size_t) (fs->data1 - fs->data0) >= fs->size) { return (0); }
+
+    fs->data1 += n;
+    return (1);
+}
+
+static inline int __freef(struct s_file *fs) {
+    /* Null-check...
+     * */
+    if (!fs) { return (0); }
+
+    if (fs->data0) { free(fs->data0); }
+    fs->data0 = 0;
+    fs->data1 = 0;
+    fs->size  = 0;
+    return (1);
+}
+
+static inline uint8_t *__getf(struct s_file *fs) {
+    /* Null-check...
+     * */
+    if (!fs) { return (0); }
+    
+    return (fs->data1);
+}
+
+
 /* SECTION: global objects
  * */
 
@@ -98,7 +163,7 @@ struct s_chunk {
     uint8_t  crc[4];
 };
 
-static inline int __chunk(FILE *, struct s_chunk *);
+static inline int __chunk(struct s_chunk *, struct s_file *fs);
 
 struct s_ihdr {
     uint32_t width;
@@ -159,19 +224,22 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
     FILE *f = fopen(path, "rb");
     if (!f) { goto __failure; }
 
+    struct s_file fs = { 0 };
+    if (!__readf(&fs, f)) { goto __failure; } 
+    fclose(f), f = 0;
+
     /* file verification...
      * */
     
-    uint8_t sign[8];
-    if (fread(sign, sizeof(uint8_t), 8, f) != 8)  { goto __failure; }
-    if (__memcmp(sign, g_sign_png, sizeof(sign))) { goto __failure; }
+    if (__memcmp(__getf(&fs), g_sign_png, 8)) { goto __failure; }
+    if (!__skipf(&fs, 8))                     { goto __failure; }
 
     /* file parsing...
      * */
 
     struct s_png png = { 0 };
     struct s_chunk chunk = { 0 };
-    while (__chunk(f, &chunk)) {
+    while (__chunk(&chunk, &fs)) {
         /* IHDR: header */
         if (!__memcmp(chunk.type, "IHDR", 4)) {
             int result = __ihdr(&png, &chunk);
@@ -252,7 +320,7 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
         }
     }
 
-    if (f) { fclose(f); }
+    __freef(&fs);
     if (chunk.data) { free(chunk.data); }
     if (png.idat.data) { free(png.idat.data); }
 
@@ -262,7 +330,7 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
 
 __failure:
     
-    if (f) { fclose(f); }
+    __freef(&fs);
     if (chunk.data) { free(chunk.data); }
     if (png.idat.data) { free(png.idat.data); }
 
@@ -273,23 +341,33 @@ __failure:
 
 
 
-static inline int __chunk(FILE *f, struct s_chunk *chunk) {
+static inline int __chunk(struct s_chunk *chunk, struct s_file *fs) {
     /* null-check...
      * */
-    if (!f)     { return (0); }
     if (!chunk) { return (0); }
+    if (!fs)    { return (0); }
 
-    if (!fread(chunk->length, sizeof(uint8_t), 4, f)) { return (0); }
-    if (!fread(chunk->type, sizeof(uint8_t), 4, f))   { return (0); }
-
+    /* extract: length */
+    if (!__memcpy(chunk->length, __getf(fs), 4)) { return (0); }
+    if (!__skipf(fs, 4)) { return (0); }
+    
+    /* extract: type / header */
+    if (!__memcpy(chunk->type, __getf(fs), 4)) { return (0); }
+    if (!__skipf(fs, 4)) { return (0); }
+    
     size_t length = __pack(chunk->length);
     if (!length) { return (0); }
 
     chunk->data = malloc(length * sizeof(uint8_t));
     if (!chunk->data) { return (0); }
 
-    if (!fread(chunk->data, sizeof(uint8_t), length, f)) { return (0); }
-    if (!fread(chunk->crc, sizeof(uint8_t), 4, f))       { return (0); }
+    /* extract: data */
+    if (!__memcpy(chunk->data, __getf(fs), length)) { return (0); }
+    if (!__skipf(fs, length)) { return (0); }
+    
+    /* extract: CRC */
+    if (!__memcpy(chunk->crc, __getf(fs), 4)) { return (0); }
+    if (!__skipf(fs, 4)) { return (0); }
 
     return (1);
 }
