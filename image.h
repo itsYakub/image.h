@@ -67,7 +67,7 @@ static inline int32_t __pack32(uint8_t data[4]) {
 
 }
 
-static inline int __memcmp(const void *s0, const void *s1, size_t n) {
+static int __memcmp(const void *s0, const void *s1, size_t n) {
     const uint8_t *c0 = (uint8_t *) s0,
                   *c1 = (uint8_t *) s1;
 
@@ -79,7 +79,7 @@ static inline int __memcmp(const void *s0, const void *s1, size_t n) {
     return (0);
 }
 
-static inline void *__memcpy(void *dst, const void *src, size_t n) {
+static void *__memcpy(void *dst, const void *src, size_t n) {
     uint8_t *c0 = (uint8_t *) src,
             *c1 = (uint8_t *) dst;
 
@@ -89,7 +89,7 @@ static inline void *__memcpy(void *dst, const void *src, size_t n) {
     return (dst);
 }
 
-static inline void *__memdup(const void *s0, size_t s) {
+static void *__memdup(const void *s0, size_t s) {
     uint8_t *c0 = (uint8_t *) s0,
             *c1 = (uint8_t *) 0;
 
@@ -99,7 +99,7 @@ static inline void *__memdup(const void *s0, size_t s) {
     return (__memcpy(c1, c0, s));
 }
 
-static inline int __isinrange(const int32_t v, const int32_t arr[], const size_t n) {
+static int __isinrange(const int32_t v, const int32_t arr[], const size_t n) {
     for (size_t i = 0; i < n; i++) {
         if (v == arr[i]) {
             return (1);
@@ -109,13 +109,13 @@ static inline int __isinrange(const int32_t v, const int32_t arr[], const size_t
 }
 
 struct s_file {
-    uint8_t *data0, /* original pointer   */
-            *data1; /* modifiable pointer */
+    const uint8_t *data0;
+          uint8_t *data1;
 
     size_t   size;
 };
 
-static inline int __readf(struct s_file *fs, FILE *f) {
+static int __readf(struct s_file *fs, FILE *f) {
     /* Null-check...
      * */
     if (!fs) { return (0); }
@@ -130,13 +130,15 @@ static inline int __readf(struct s_file *fs, FILE *f) {
     if (!data) { return (0); }
     if (fread(data, sizeof(uint8_t), size, f) != size) { free(data); return (0); }
 
-    fs->data0 = data;
-    fs->data1 = data;
-    fs->size  = size;
+    *fs = (struct s_file) {
+        .data0 = data,
+        .data1 = data,
+        .size = size
+    };
     return (1);
 }
 
-static inline int __skipf(struct s_file *fs, const size_t n) {
+static int __skipf(struct s_file *fs, const size_t n) {
     /* Null-check...
      * */
     if (!fs)        { return (0); }
@@ -148,19 +150,15 @@ static inline int __skipf(struct s_file *fs, const size_t n) {
     return (1);
 }
 
-static inline int __freef(struct s_file *fs) {
+static int __freef(struct s_file *fs) {
     /* Null-check...
      * */
     if (!fs) { return (0); }
-
-    if (fs->data0) { free(fs->data0); }
-    fs->data0 = 0;
-    fs->data1 = 0;
-    fs->size  = 0;
+    if (fs->data0) { free((void *) fs->data0); }
     return (1);
 }
 
-static inline uint8_t *__getf(struct s_file *fs) {
+static uint8_t *__getf(struct s_file *fs) {
     /* Null-check...
      * */
     if (!fs) { return (0); }
@@ -178,18 +176,12 @@ static const uint8_t g_sign_png[] = { 137, 80, 78, 71, 13, 10, 26, 10 };
 /* SECTION: image.h api (.png)
  * */
 
-struct s_png;
-
-
 struct s_chunk {
     uint8_t  *data;
     uint32_t  length;
     uint32_t  type;
     uint32_t  crc;
 };
-
-static inline int __chunk(struct s_chunk *, struct s_file *fs);
-
 
 struct s_ihdr {
     uint32_t width;
@@ -202,40 +194,40 @@ struct s_ihdr {
     uint8_t interlace;
 };
 
-static inline int __ihdr(struct s_png *, struct s_chunk *);
-
-
 struct s_plte {
     uint8_t data[256 * 4];
     size_t  size;
 };
-
-static inline int __plte(struct s_png *, struct s_chunk *);
-
 
 struct s_idat {
     uint8_t *data;
     size_t   size;
 };
 
-static inline int __idat(struct s_png *, struct s_chunk *);
-
-
-struct s_iend {
-    uint8_t *data;
-    size_t   size;
-};
-
-static inline int __iend(struct s_png *);
-
-
 struct s_png {
     struct s_ihdr ihdr;
     struct s_plte plte;
     struct s_idat idat;
-    struct s_iend iend;
+
+    /* TODO:
+     *  we should count the occurances of each chunk.
+     *  general rules:
+     *  - IHDR - first one, only one
+     *  - PLTE - after IHDR, before IDAT, only one
+     *  - IDAT - after IHDR and PLTE, can be multiple of them
+     *  - IEND - after IHDR, PLTE and IDAT('s), only one
+     * */
 };
 
+static int __chunk(struct s_chunk *, struct s_file *);
+
+static int __ihdr(struct s_ihdr *, struct s_chunk *);
+
+static int __plte(struct s_plte *, struct s_chunk *);
+
+static int __idat(struct s_idat *, struct s_chunk *);
+
+static int __iend(struct s_png *);
 
 
 IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
@@ -265,21 +257,21 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
 
         /* IHDR: header */
         if (chunk.type == (uint32_t) __pack32((uint8_t *) "IHDR")) {
-            int result = __ihdr(&png, &chunk);
+            int result = __ihdr(&png.ihdr, &chunk);
 
             if (!result) { goto __failure; }
         }
         
         /* PLTE: palette */
         else if (chunk.type == (uint32_t) __pack32((uint8_t *) "PLTE")) {
-            int result = __plte(&png, &chunk);
+            int result = __plte(&png.plte, &chunk);
 
             if (!result) { goto __failure; }
         }
         
         /* IDAT: data */
         else if (chunk.type == (uint32_t) __pack32((uint8_t *) "IDAT")) {
-            int result = __idat(&png, &chunk);
+            int result = __idat(&png.idat, &chunk);
 
             if (!result) { goto __failure; }
         }
@@ -298,17 +290,15 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
     }
 
     __freef(&fs);
-    // if (chunk.data) { free(chunk.data); }
     if (png.idat.data) { free(png.idat.data); }
 
     if (width)  { *width  = png.ihdr.width;  }
     if (height) { *height = png.ihdr.height; }
-    return (png.iend.data);
+    return (0);
 
 __failure:
     
     __freef(&fs);
-    // if (chunk.data) { free(chunk.data); }
     if (png.idat.data) { free(png.idat.data); }
 
     if (width)  { *width  = 0; }
@@ -317,8 +307,7 @@ __failure:
 }
 
 
-
-static inline int __chunk(struct s_chunk *chunk, struct s_file *fs) {
+static int __chunk(struct s_chunk *chunk, struct s_file *fs) {
     /* null-check...
      * */
     if (!chunk) { return (0); }
@@ -343,10 +332,11 @@ static inline int __chunk(struct s_chunk *chunk, struct s_file *fs) {
     return (1);
 }
 
-static inline int __ihdr(struct s_png *png, struct s_chunk *chunk) {
+
+static int __ihdr(struct s_ihdr *ihdr, struct s_chunk *chunk) {
     /* null-check...
      * */
-    if (!png)   { return (0); }
+    if (!ihdr)  { return (0); }
     if (!chunk) { return (0); }
 
     uint8_t *data = chunk->data;
@@ -355,57 +345,55 @@ static inline int __ihdr(struct s_png *png, struct s_chunk *chunk) {
     uint32_t width = __pack32(data); data += 4;
     if (!width) { return (0); }
     if (width > (1u << 24)) { return (0); }
+    ihdr->width = width;
 
     uint32_t height = __pack32(data); data += 4;
     if (!height) { return (0); }
     if (height > (1u << 24)) { return (0); }
+    ihdr->height = height;
 
     uint8_t bit = *data++;
     if (!__isinrange(bit, (int32_t []) { 1, 2, 4, 8, 16 }, 5)) { return (0); }
+    ihdr->bit = bit;
 
     uint8_t type = *data++;
     if (!__isinrange(type, (int32_t []) { 0, 2, 3, 4, 6 }, 5)) { return (0); }
+    ihdr->type = type;
 
     uint8_t comp = *data++;
     if (comp) { return (0); }
+    ihdr->comp = comp;
 
     uint8_t filter = *data++;
     if (filter) { return (0); }
+    ihdr->filter = filter;
 
     uint8_t interlace = *data++;
     if (!__isinrange(interlace, (int32_t []) { 0, 1 }, 2)) { return (0); }
-
-    png->ihdr = (struct s_ihdr) {
-        .width     = width,
-        .height    = height,
-        .bit       = bit,
-        .type      = type,
-        .comp      = comp,
-        .filter    = filter,
-        .interlace = interlace
-    };
+    ihdr->interlace = interlace;
 
     return (1);
 }
 
-static inline int __plte(struct s_png *png, struct s_chunk *chunk) {
+
+static int __plte(struct s_plte *plte, struct s_chunk *chunk) {
     /* null-check...
      * */
-    if (!png)   { return (0); }
+    if (!plte)  { return (0); }
     if (!chunk) { return (0); }
 
     size_t length = chunk->length;
     if (length >= 256 * 3) { return (0); }
     
-    png->plte.size = length / 3.0;
-    if (png->plte.size * 3 != length) { return (0); }
+    plte->size = length / 3.0;
+    if (plte->size * 3 != length) { return (0); }
 
-    uint8_t *data0 = png->plte.data,
+    uint8_t *data0 = plte->data,
             *data1 = chunk->data;
     if (!data0) { return (0); }
     if (!data1) { return (0); }
 
-    for (size_t i = 0; i < png->plte.size; i++) {
+    for (size_t i = 0; i < plte->size; i++) {
         *data0++ = *data1++;
         *data0++ = *data1++;
         *data0++ = *data1++;
@@ -415,29 +403,31 @@ static inline int __plte(struct s_png *png, struct s_chunk *chunk) {
     return (1);
 }
 
-static inline int __idat(struct s_png *png, struct s_chunk *chunk) {
+
+static int __idat(struct s_idat *idat, struct s_chunk *chunk) {
     /* null-check...
      * */
-    if (!png)   { return (0); }
+    if (!idat)  { return (0); }
     if (!chunk) { return (0); }
 
     /* Extract the PNG data...
      * */
-    size_t length0 = png->idat.size,
+    size_t length0 = idat->size,
            length1 = chunk->length;
     if (!length1) { return (0); }
     if (length1 > (1u << 30)) { return (0); }
 
-    uint8_t *data = realloc(png->idat.data, (length0 + length1) * sizeof(uint8_t));
+    uint8_t *data = realloc(idat->data, (length0 + length1) * sizeof(uint8_t));
     if (!data) { return (0); }
     if (!__memcpy(data + length0, chunk->data, length1)) { return (0); }
 
-    png->idat.data = data;
-    png->idat.size += length1;
+    idat->data = data;
+    idat->size += length1;
     return (1);
 }
 
-static inline int __iend(struct s_png *png) {
+
+static int __iend(struct s_png *png) {
     /* null-check...
      * */
     if (!png)            { return (0); }
