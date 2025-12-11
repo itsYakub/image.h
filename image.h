@@ -95,6 +95,8 @@ static void *__memcpy(void *dst, const void *src, size_t n) {
 }
 
 static void *__memdup(const void *s0, size_t s) {
+    if (!s0) { return (0); }
+
     uint8_t *c0 = (uint8_t *) s0,
             *c1 = (uint8_t *) 0;
 
@@ -102,6 +104,49 @@ static void *__memdup(const void *s0, size_t s) {
     if (!c1) { return (0); }
 
     return (__memcpy(c1, c0, s));
+}
+
+static size_t __strlen(const char *str) {
+    if (!str)  { return (0); }
+    if (!*str) { return (0); }
+    for (size_t i = 0; str; i++) {
+        if (!str[i]) { return (i); }
+    }
+    return (0);
+}
+
+static char *__strdup(const char *str) {
+    if (!str) { return (0); }
+
+    const size_t length = __strlen(str);
+    if (!length) { return (calloc(1, 1)); }
+
+    char *s0 = calloc(length + 1, sizeof(char));
+    if (!s0) { return (0); }
+
+    return (__memcpy(s0, str, length));
+}
+
+static char *__strndup(const char *str, size_t n) {
+    if (!str) { return (0); }
+    if (!n)   { return (calloc(1, 1)); }
+
+    const size_t length = __strlen(str);
+    if (length <= n) { return (__strdup(str)); }
+
+    char *s0 = calloc(n + 1, sizeof(char));
+    if (!s0) { return (0); }
+
+    return (__memcpy(s0, str, n));
+}
+
+static char *__getline(const char *str) {
+    if (!str) { return (0); }
+
+    const char *find = str;
+    while (*find && *find != '\n') { find++; }
+
+    return (__strndup(str, find - str));
 }
 
 static int __isinrange(const int32_t v, const int32_t arr[], const size_t n) {
@@ -113,8 +158,16 @@ static int __isinrange(const int32_t v, const int32_t arr[], const size_t n) {
     return (0);
 }
 
+static int __isspace(int c) {
+    return ((c >= '\t' && c <= '\r') || c == ' ');
+}
+
+static int __isdigit(int c) {
+    return (c >= '0' && c <= '9');
+}
+
 static int __atoi(const char *str) {
-    while (isspace(*str)) { str++; }
+    while (__isspace(*str)) { str++; }
 
     int sign = 1;
     if (*str == '+' || *str == '-') {
@@ -125,7 +178,7 @@ static int __atoi(const char *str) {
     }
 
     int value = 0;
-    while (isdigit(*str)) {
+    while (__isdigit(*str)) {
         value *= 10;
         value += (int) (*str - '0');
         str++;
@@ -134,72 +187,23 @@ static int __atoi(const char *str) {
     return (value * sign);
 }
 
-static int __isspace(int c) {
-    return ((c >= '\t' && c <= '\r') || c == ' ');
-}
-
-static int __isdigit(int c) {
-    return (c >= '0' && c <= '9');
-}
 
 
-
-struct s_file {
-    const uint8_t *data0;
-          uint8_t *data1;
-
-    size_t   size;
-};
-
-static int __readf(struct s_file *fs, FILE *f) {
+static char *__read(FILE *f) {
     /* Null-check...
      * */
-    if (!fs) { return (0); }
-    if (!f)  { return (0); }
+    if (!f) { return (0); }
 
     fseek(f, 0, SEEK_END);
     size_t size = ftell(f);
     fseek(f, 0, SEEK_SET);
     if (!size) { return (0); }
 
-    uint8_t *data = malloc(size);
+    char *data = malloc(size);
     if (!data) { return (0); }
     if (fread(data, sizeof(uint8_t), size, f) != size) { free(data); return (0); }
 
-    *fs = (struct s_file) {
-        .data0 = data,
-        .data1 = data,
-        .size = size
-    };
-    return (1);
-}
-
-static int __skipf(struct s_file *fs, const size_t n) {
-    /* Null-check...
-     * */
-    if (!fs)        { return (0); }
-    if (!fs->data0) { return (0); }
-    if (!fs->data1) { return (0); }
-    if (!n)         { return (0); }
-
-    fs->data1 += n;
-    return (1);
-}
-
-static int __freef(struct s_file *fs) {
-    /* Null-check...
-     * */
-    if (!fs) { return (0); }
-    if (fs->data0) { free((void *) fs->data0); }
-    return (1);
-}
-
-static uint8_t *__getf(struct s_file *fs) {
-    /* Null-check...
-     * */
-    if (!fs) { return (0); }
-    
-    return (fs->data1);
+    return (data);
 }
 
 
@@ -210,7 +214,7 @@ static const uint8_t g_sign_pgm0[] = { 80, 49 },
                      g_sign_pgm1[] = { 80, 52 };
 
 static const uint8_t g_sign_pbm0[] = { 80, 50 },
-                     g_sign_pbm1[] = { 80, 53 }'
+                     g_sign_pbm1[] = { 80, 53 };
 
 static const uint8_t g_sign_ppm0[] = { 80, 51 },
                      g_sign_ppm1[] = { 80, 54 };
@@ -234,6 +238,17 @@ enum e_pnmtype {
     T_COUNT
 };
 
+enum e_pnmmode {
+    M_NONE = 0,
+
+    M_HEADER = 1,
+    M_DATA   = 2,
+
+    /* ... */
+
+    M_COUNT
+};
+
 IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
     if (!path)  { goto __failure; }
     if (!*path) { goto __failure; }
@@ -241,63 +256,70 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
     FILE *f = fopen(path, "rb");
     if (!f) { goto __failure; }
 
-    struct s_file fs = { 0 };
-    if (!__readf(&fs, f)) { goto __failure; } 
+    const char *f0 = 0,
+               *f1 = 0;
+
+    f0 = __read(f);
+    if (!f0) { goto __failure; }
     fclose(f), f = 0;
+    f1 = f0;
 
-    /* file verification...
-     * */
-    
-    /* P1, P4 - .pgm file sign. */
-    if (
-        !__memcmp(__getf(&fs), g_sign_pgm0, 2) ||
-        !__memcmp(__getf(&fs), g_sign_pgm1, 2)
-    ) { }
+    enum e_pnmmode mode = M_HEADER;
+    enum e_pnmtype type = T_NONE;
+    char *line = __getline(f1);
+    while (line && *line) {
+        /* signature
+         * */
+        if (*line == 'P') {
+            /* corrupted pnm: parsing mode not M_HEADER */
+            if (type != M_HEADER) { goto __failure; }
 
-    /* P2, P5 - .pbm file sign. */
-    else if (
-        !__memcmp(__getf(&fs), g_sign_pbm0, 2) ||
-        !__memcmp(__getf(&fs), g_sign_pbm1, 2)
-    ) { }
+            /* corrupted pnm: multiple signatures */
+            if (type != T_NONE) { goto __failure; }
 
-    /* P3, P6 - .ppm file sign. */
-    else if (
-        !__memcmp(__getf(&fs), g_sign_ppm0, 2) ||
-        !__memcmp(__getf(&fs), g_sign_ppm1, 2)
-    ) { }
+            /* P1, P4 - .pgm file sign. */
+            if (
+                !__memcmp(f1, g_sign_pgm0, 2) ||
+                !__memcmp(f1, g_sign_pgm1, 2)
+            ) { type = T_PGM; }
 
-    else { goto __failure; }
+            /* P2, P5 - .pbm file sign. */
+            else if (
+                !__memcmp(f1, g_sign_pbm0, 2) ||
+                !__memcmp(f1, g_sign_pbm1, 2)
+            ) { type = T_PBM; }
 
-    if (!__skipf(&fs, 2)) { goto __failure; }
+            /* P3, P6 - .ppm file sign. */
+            else if (
+                !__memcmp(f1, g_sign_ppm0, 2) ||
+                !__memcmp(f1, g_sign_ppm1, 2)
+            ) { type = T_PPM; }
+            
+            /* corrupted pnm: invalid signature */
+            else { goto __failure; }
+        }
 
-    /* extract dimensions...
-     * */
+        else { /* ...ignoreme... */ }
 
-    while (__isspace(__getf(&fs))) { __skipf(&fs, 1); }
-    size_t width = __atoi(__getf(&fs));
-    if (!width) { goto __failure; }
-    while (!__isspace(__getf(&fs))) { __skipf(&fs, 1); }
+        /* move the buffer to the next line by skipping all the bytes of the current line... */
+        f1 += __strlen(line) + 1;
+        printf("%s\n", f1);
+        
+        /* release the current line and allocate a new line based on the buffer... */
+        free(line), line = __getline(f1);
+    }
 
-    while (__isspace(__getf(&fs))) { __skipf(&fs, 1); }
-    size_t heighti = __atoi(__getf(&fs));
-    if (!width) { goto __failure; }
-    while (!__isspace(__getf(&fs))) { __skipf(&fs, 1); }
+    if (f0) { free((void *) f0); }
+    if (line) { free(line); }
 
-    /* extract data...
-     * */
-
-    /* ... */
-
-    
-    __freef(&fs);
-
-    if (width)  { *width  = width;  }
-    if (height) { *height = height; }
+    if (width)  { *width  = 0; }
+    if (height) { *height = 0; }
     return (0);
 
 __failure:
     
-    __freef(&fs);
+    if (f0) { free((void *) f0); }
+    if (line) { free(line); }
 
     if (width)  { *width  = 0; }
     if (height) { *height = 0; }
@@ -351,7 +373,7 @@ struct s_png {
      * */
 };
 
-static int __chunk(struct s_chunk *, struct s_file *);
+static int __chunk(struct s_chunk *, const char *f);
 
 static int __ihdr(struct s_ihdr *, struct s_chunk *);
 
@@ -369,15 +391,19 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
     FILE *f = fopen(path, "rb");
     if (!f) { goto __failure; }
 
-    struct s_file fs = { 0 };
-    if (!__readf(&fs, f)) { goto __failure; } 
+    const char *f0 = 0,
+               *f1 = 0;
+
+    f0 = __read(f);
+    if (!f0) { goto __failure; }
     fclose(f), f = 0;
+    f1 = f0;
 
     /* file verification...
      * */
     
-    if (__memcmp(__getf(&fs), g_sign_png, 8)) { goto __failure; }
-    if (!__skipf(&fs, 8))                     { goto __failure; }
+    if (__memcmp(f1, g_sign_png, 8)) { goto __failure; }
+    f1 += 8;
 
     /* file parsing...
      * */
@@ -385,7 +411,7 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
     struct s_png png = { 0 };
     struct s_chunk chunk = { 0 };
     while (chunk.type != (uint32_t) __pack32((uint8_t *) "IEND")) {
-        __chunk(&chunk, &fs);
+        f1 += __chunk(&chunk, f1);
 
         /* IHDR: header */
         if (chunk.type == (uint32_t) __pack32((uint8_t *) "IHDR")) {
@@ -421,7 +447,7 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
         if (chunk.data) { free(chunk.data), chunk.data = 0; }
     }
 
-    __freef(&fs);
+    if (f0) { free((void *) f0); }
     if (png.idat.data) { free(png.idat.data); }
 
     if (width)  { *width  = png.ihdr.width;  }
@@ -430,7 +456,7 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
 
 __failure:
     
-    __freef(&fs);
+    if (f0) { free((void *) f0); }
     if (png.idat.data) { free(png.idat.data); }
 
     if (width)  { *width  = 0; }
@@ -439,29 +465,32 @@ __failure:
 }
 
 
-static int __chunk(struct s_chunk *chunk, struct s_file *fs) {
+static int __chunk(struct s_chunk *chunk, const char *str) {
     /* null-check...
      * */
     if (!chunk) { return (0); }
-    if (!fs)    { return (0); }
+
+    /* original pointer to the 'str'
+     * */
+    const char *diff = str;
 
     /* extract: length */
-    chunk->length = __pack32(__getf(fs));
-    __skipf(fs, 4);
+    chunk->length = __pack32((uint8_t *) str);
+    str += 4;
     
     /* extract: type / header */
-    chunk->type = __pack32(__getf(fs));
-    __skipf(fs, 4);
+    chunk->type = __pack32((uint8_t *) str);
+    str += 4;
 
     /* extract: data */
-    chunk->data = __memdup(__getf(fs), chunk->length);
-    __skipf(fs, chunk->length);
+    chunk->data = __memdup(str, chunk->length);
+    str += chunk->length;
     
     /* extract: CRC */
-    chunk->crc = __pack32(__getf(fs));
-    __skipf(fs, 4);
+    chunk->crc = __pack32((uint8_t *) str);
+    str += 4;
 
-    return (1);
+    return (str - diff);
 }
 
 
