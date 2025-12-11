@@ -103,6 +103,9 @@ enum e_pnmtype {
     PNM_COUNT
 };
 
+static inline char *__pnm_skipComment(const char *); 
+
+
 IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
     if (!path)  { return (0); }
     if (!*path) { return (0); }
@@ -142,19 +145,25 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
         default: { return (0); }
     }
 
+    f = __pnm_skipComment(f);
+
     /* width...
      * */
     while (*f && !__isdigit(*f)) { f++; }
     size_t pnm_w = __atoi(f);
-    if (!pnm_w) { free((void *) f); return (0); }
+    if (!pnm_w) { free((void *) f_ptr); return (0); }
     while (*f && !__isspace(*f)) { f++; }
+
+    f = __pnm_skipComment(f);
     
     /* height...
      * */
     while (*f && !__isdigit(*f)) { f++; }
     size_t pnm_h = __atoi(f);
-    if (!pnm_h) { free((void *) f); return (0); }
+    if (!pnm_h) { free((void *) f_ptr); return (0); }
     while (*f && !__isspace(*f)) { f++; }
+
+    f = __pnm_skipComment(f);
 
     /* maxval (only for .pgm and .ppm)
      *        (.pbm defaults to '1')
@@ -163,16 +172,18 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
     if (type == PNM_PGM || type == PNM_PPM) {
         while (*f && !__isdigit(*f)) { f++; }
         maxval = __atoi(f);
-        if (!maxval) { free((void *) f); return (0); }
+        if (!maxval) { free((void *) f_ptr); return (0); }
         while (*f && !__isspace(*f)) { f++; }
     }
+
+    f = __pnm_skipComment(f);
 
     /* data...
      * */
     size_t i = 0,
            j = pnm_w * pnm_h * 4;
     uint8_t *data = malloc(j * sizeof(uint8_t));
-    if (!data) { free((void *) f); return (0); }
+    if (!data) { free((void *) f_ptr); return (0); }
     while (i < j) {
         switch (type) {
             case (PNM_PBM):
@@ -180,12 +191,14 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
                 while (*f && !__isdigit(*f)) { f++; }
                 uint8_t sample = __atoi(f);
                 if (sample > maxval) {
-                    free((void *) f);
+                    free((void *) f_ptr);
                     free(data);
 
                     return (0);
                 }
                 while (*f && !__isspace(*f)) { f++; }
+
+                f = __pnm_skipComment(f);
 
                 data[i++] = sample;
                 data[i++] = sample;
@@ -194,11 +207,11 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
             } break;
 
             case (PNM_PPM): {
-                for (size_t i = 0; i < 3; i++) {
+                for (size_t k = 0; k < 3; k++) {
                     while (*f && !__isdigit(*f)) { f++; }
                     uint8_t sample = __atoi(f);
                     if (sample > maxval) {
-                        free((void *) f);
+                        free((void *) f_ptr);
                         free(data);
 
                         return (0);
@@ -206,6 +219,8 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
 
                     data[i++] = sample;
                     while (*f && !__isspace(*f)) { f++; }
+
+                    f = __pnm_skipComment(f);
                 }
                 data[i++] = 255;
             } break;
@@ -218,6 +233,21 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
     if (width)  { *width  = pnm_w; }
     if (height) { *height = pnm_h; }
     return (data);
+}
+
+
+static inline char *__pnm_skipComment(const char *s) {
+    /* Null-check...
+     * */
+    if (!s)  { return (0); }
+    if (!*s) { return (0); }
+
+    while (__isspace(*s)) { s++; }
+    if (*s == '#') {
+        while (*s && *s != '\n') { s++; }
+    }
+
+    return ((char *) s);
 }
 
 
