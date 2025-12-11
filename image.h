@@ -62,14 +62,6 @@ static void *__memcpy(void *, const void *, size_t);
 
 static void *__memdup(const void *, size_t);
 
-static size_t __strlen(const char *);
-
-static char *__strdup(const char *);
-
-static char *__strndup(const char *, size_t);
-
-static char *__getline(const char *);
-
 static int __isinrange(const int32_t, const int32_t [], const size_t);
 
 static int __isspace(int);
@@ -100,41 +92,17 @@ static const uint8_t g_sign_png[] = { 137, 80, 78, 71, 13, 10, 26, 10 };
  * */
 
 enum e_pnmtype {
-    T_NONE = 0,
+    PNM_NONE = 0, /* initial state */
 
-    T_PGM = 1,
-    T_PBM = 2,
-    T_PPM = 3,
-    T_PAM = 4,
-
-    /* ... */
-
-    T_COUNT
-};
-
-enum e_pnmmode {
-    M_HEADER = 0,
-    M_DATA   = 1,
+    PNM_PBM = 1,  /* P1, P4 */
+    PNM_PGM = 2,  /* P2, P5 */
+    PNM_PPM = 3,  /* P3, P6 */
+    PNM_PAM = 4,  /* P7 */
 
     /* ... */
 
-    M_COUNT
+    PNM_COUNT
 };
-
-struct s_pnm {
-    enum e_pnmtype type;
-    enum e_pnmmode mode;
-
-    size_t width;
-    size_t height;
-
-    uint8_t *data;
-    size_t   size;
-};
-
-static size_t __pnm_header(struct s_pnm *, const char *);
-
-static size_t __pnm_data(struct s_pnm *, const char *);
 
 IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
     if (!path)  { goto __failure; }
@@ -151,20 +119,103 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
     fclose(f), f = 0;
     f1 = f0;
 
-    struct s_pnm pnm = { 0 };
-    size_t off = __pnm_header(&pnm, f0);
-    if (!off) { goto __failure; }
-    f1 += off;
+    enum e_pnmtype type = PNM_NONE;
 
-    off = __pnm_data(&pnm, f1);
-    if (!off) { goto __failure; }
-    f1 += off;
+    /* verify signature...
+     * */
+    while (__isspace(*f1)) { f1++; }
+    if (*f1++ != 'P') { goto __failure; } /* pnm corrupt: no signature */
+    switch (*f1++) {
+        case ('1'):
+        case ('4'): {
+            type = PNM_PBM;
+        } break;
+        
+        case ('2'):
+        case ('5'): {
+            type = PNM_PGM;
+        } break;
+        
+        case ('3'):
+        case ('6'): {
+            type = PNM_PPM;
+        } break;
+        
+        case ('7'): {
+            type = PNM_PPM;
+
+            /* TODO: check the official spec for .pam image format
+             *       for now it'll just return a failure
+             * */
+
+            goto __failure;
+        } break;
+
+        default: { goto __failure; }
+    }
+
+    /* extract width...
+     * */
+    while (*f1 && !__isdigit(*f1)) {
+        /* if comment - ignore the remaining line... */
+        if (*f1 && *f1 == '#') {
+            while (*f1 != '\n') { f1++; }
+
+            continue;
+        }
+
+        f1++;
+    }
+
+    size_t pnm_w = __atoi(f1);
+    if (!pnm_w) { goto __failure; }
+    while (*f1 && __isdigit(*f1)) { f1++; }
+    
+    /* extract height...
+     * */
+    while (*f1 && !__isdigit(*f1)) {
+        /* if comment - ignore the remaining line... */
+        if (*f1 && *f1 == '#') {
+            while (*f1 != '\n') { f1++; }
+
+            continue;
+        }
+
+        f1++;
+    }
+
+    size_t pnm_h = __atoi(f1);
+    if (!pnm_h) { goto __failure; }
+    while (*f1 && __isdigit(*f1)) { f1++; }
+
+    /* extract data... */
+    size_t   size = 0;
+    uint8_t *data = malloc(pnm_w * pnm_h * sizeof(uint8_t)); /* TODO: check the size of the allocated memory if it fits all the data for the specific format */
+    if (!data) { goto __failure; }
+    while (*f1) {
+        /* if comment - ignore the remaining line... */
+        if (*f1 && *f1 == '#') {
+            while (*f1 != '\n') { f1++; }
+
+            continue;
+        }
+        
+        /* skip all the whitespaces... */
+        while (*f1 && __isspace(*f1)) { f1++; }
+
+        /* if the current char is a digit, extract it and store it in the 'data'... */
+        if (__isdigit(*f1)) {
+            data[size++] = __atoi(f1);
+
+            while (*f1 && !__isspace(*f1)) { f1++; }
+        }
+    }
 
     if (f0) { free((void *) f0); }
 
-    if (width)  { *width  = 0; }
-    if (height) { *height = 0; }
-    return (0);
+    if (width)  { *width  = pnm_w; }
+    if (height) { *height = pnm_h; }
+    return (data);
 
 __failure:
 
@@ -173,91 +224,6 @@ __failure:
     if (width)  { *width  = 0; }
     if (height) { *height = 0; }
     return (0);
-}
-
-static size_t __pnm_header(struct s_pnm *pnm, const char *f) {
-    /* Null-check...
-     * */
-    if (!pnm) { return (0); }
-    if (!f)   { return (0); }
-
-    /* Mode-check...
-     * */
-    if (pnm->mode != M_HEADER) { return (0); }
-
-    /* original pointer to the 'str'
-     * */
-    const char *diff = f;
-
-    char *line = __getline(f);
-    while (line && *line) { 
-        /* signature
-         * */
-        if (*line == 'P') {
-            /* corrupted pnm: multiple signatures */
-            if (pnm->type != T_NONE) { free(line); return (0); }
-
-            /* P1, P4 - .pgm file sign. */
-            if (*(line + 1) == '1' || *(line + 1) == '4') { pnm->type = T_PGM; }
-            
-            /* P2, P5 - .pbm file sign. */
-            else if (*(line + 1) == '2' || *(line + 1) == '5') { pnm->type = T_PBM; }
-            
-            /* P3, P6 - .pbm file sign. */
-            else if (*(line + 1) == '3' || *(line + 1) == '6') { pnm->type = T_PPM; }
-            
-            /* corrupted pnm: invalid signature */
-            else { free(line); return (0); }
-        }
-
-        else {
-            /* '#' stands for ignorable comment lines...
-             * */
-            if (*line != '#') {
-                /* corrupted pnm: no signature */
-                if (pnm->type == T_NONE) { free(line); return (0); }
-
-                /* 1. Check if dimensions are non-zero; if not, process dimensions
-                 * 2. Check if dimensions are non-zero; if yes, check the file type; if not PGM, get the size of each byte and switch the mode
-                 * 2. Check if dimensions are non-zero; if yes, check the file type; if PGM, switch the mode
-                 * */
-            }
-        }
-        
-        /* move the buffer to the next line by skipping all the bytes of the current line... */
-        f += __strlen(line) + 1;
-        
-        /* release the current line and allocate a new line based on the buffer... */
-        free(line), line = __getline(f);
-    }
-
-    return (diff - f);
-}
-
-static size_t __pnm_data(struct s_pnm *pnm, const char *f) {
-    /* Null-check...
-     * */
-    if (!pnm) { return (0); }
-    if (!f)   { return (0); }
-
-    /* Mode-check...
-     * */
-    if (pnm->mode != M_DATA) { return (0); }
-
-    const char *diff = f;
-    
-    char *line = __getline(f);
-    while (line && *line) { 
-        /* ... */
-
-        /* move the buffer to the next line by skipping all the bytes of the current line... */
-        f += __strlen(line) + 1;
-        
-        /* release the current line and allocate a new line based on the buffer... */
-        free(line), line = __getline(f);
-    }
-
-    return (f - diff);
 }
 
 
@@ -580,15 +546,6 @@ static void *__memcpy(void *dst, const void *src, size_t n) {
     return (dst);
 }
 
-static size_t __strlen(const char *str) {
-    if (!str)  { return (0); }
-    if (!*str) { return (0); }
-    for (size_t i = 0; str; i++) {
-        if (!str[i]) { return (i); }
-    }
-    return (0);
-}
-
 static void *__memdup(const void *s0, size_t s) {
     if (!s0) { return (0); }
 
@@ -599,41 +556,6 @@ static void *__memdup(const void *s0, size_t s) {
     if (!c1) { return (0); }
 
     return (__memcpy(c1, c0, s));
-}
-
-static char *__strdup(const char *str) {
-    if (!str) { return (0); }
-
-    const size_t length = __strlen(str);
-    if (!length) { return (calloc(1, 1)); }
-
-    char *s0 = calloc(length + 1, sizeof(char));
-    if (!s0) { return (0); }
-
-    return (__memcpy(s0, str, length));
-}
-
-static char *__strndup(const char *str, size_t n) {
-    if (!str) { return (0); }
-    if (!n)   { return (calloc(1, 1)); }
-
-    const size_t length = __strlen(str);
-    if (length <= n) { return (__strdup(str)); }
-
-    char *s0 = calloc(n + 1, sizeof(char));
-    if (!s0) { return (0); }
-
-    return (__memcpy(s0, str, n));
-}
-
-static char *__getline(const char *str) {
-    if (!str) { return (0); }
-
-    const char *find = str;
-    while (*find && *find != '\n') { find++; }
-    if (str == find) { return (0); }
-
-    return (__strndup(str, find - str));
 }
 
 static int __isinrange(const int32_t v, const int32_t arr[], const size_t n) {
@@ -684,7 +606,7 @@ static char *__read(FILE *f) {
     fseek(f, 0, SEEK_SET);
     if (!size) { return (0); }
 
-    char *data = malloc(size);
+    char *data = calloc(size + 1, sizeof(char));
     if (!data) { return (0); }
     if (fread(data, sizeof(uint8_t), size, f) != size) { free(data); return (0); }
 
