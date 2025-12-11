@@ -15,7 +15,12 @@ extern "C" {
 
 # endif /* __cplusplus */
 
-/* SECTION: image.h api
+/* SECTION: image.h api (.pnm)
+ * */
+
+IMGAPI void *imageLoadPNM(const char *, int *, int *);
+
+/* SECTION: image.h api (.png)
  * */
 
 IMGAPI void *imageLoadPNG(const char *, int *, int *);
@@ -108,6 +113,37 @@ static int __isinrange(const int32_t v, const int32_t arr[], const size_t n) {
     return (0);
 }
 
+static int __atoi(const char *str) {
+    while (isspace(*str)) { str++; }
+
+    int sign = 1;
+    if (*str == '+' || *str == '-') {
+        if (*str == '-') {
+            sign *= -1;
+        }
+        str++;
+    }
+
+    int value = 0;
+    while (isdigit(*str)) {
+        value *= 10;
+        value += (int) (*str - '0');
+        str++;
+    }
+
+    return (value * sign);
+}
+
+static int __isspace(int c) {
+    return ((c >= '\t' && c <= '\r') || c == ' ');
+}
+
+static int __isdigit(int c) {
+    return (c >= '0' && c <= '9');
+}
+
+
+
 struct s_file {
     const uint8_t *data0;
           uint8_t *data1;
@@ -170,7 +206,103 @@ static uint8_t *__getf(struct s_file *fs) {
 /* SECTION: global objects
  * */
 
+static const uint8_t g_sign_pgm0[] = { 80, 49 },
+                     g_sign_pgm1[] = { 80, 52 };
+
+static const uint8_t g_sign_pbm0[] = { 80, 50 },
+                     g_sign_pbm1[] = { 80, 53 }'
+
+static const uint8_t g_sign_ppm0[] = { 80, 51 },
+                     g_sign_ppm1[] = { 80, 54 };
+
 static const uint8_t g_sign_png[] = { 137, 80, 78, 71, 13, 10, 26, 10 };
+
+
+/* SECTION: image.h api (.pnm)
+ * */
+
+enum e_pnmtype {
+    T_NONE = 0,
+
+    T_PGM = 1,
+    T_PBM = 2,
+    T_PPM = 3,
+    T_PAM = 4,
+
+    /* ... */
+
+    T_COUNT
+};
+
+IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
+    if (!path)  { goto __failure; }
+    if (!*path) { goto __failure; }
+
+    FILE *f = fopen(path, "rb");
+    if (!f) { goto __failure; }
+
+    struct s_file fs = { 0 };
+    if (!__readf(&fs, f)) { goto __failure; } 
+    fclose(f), f = 0;
+
+    /* file verification...
+     * */
+    
+    /* P1, P4 - .pgm file sign. */
+    if (
+        !__memcmp(__getf(&fs), g_sign_pgm0, 2) ||
+        !__memcmp(__getf(&fs), g_sign_pgm1, 2)
+    ) { }
+
+    /* P2, P5 - .pbm file sign. */
+    else if (
+        !__memcmp(__getf(&fs), g_sign_pbm0, 2) ||
+        !__memcmp(__getf(&fs), g_sign_pbm1, 2)
+    ) { }
+
+    /* P3, P6 - .ppm file sign. */
+    else if (
+        !__memcmp(__getf(&fs), g_sign_ppm0, 2) ||
+        !__memcmp(__getf(&fs), g_sign_ppm1, 2)
+    ) { }
+
+    else { goto __failure; }
+
+    if (!__skipf(&fs, 2)) { goto __failure; }
+
+    /* extract dimensions...
+     * */
+
+    while (__isspace(__getf(&fs))) { __skipf(&fs, 1); }
+    size_t width = __atoi(__getf(&fs));
+    if (!width) { goto __failure; }
+    while (!__isspace(__getf(&fs))) { __skipf(&fs, 1); }
+
+    while (__isspace(__getf(&fs))) { __skipf(&fs, 1); }
+    size_t heighti = __atoi(__getf(&fs));
+    if (!width) { goto __failure; }
+    while (!__isspace(__getf(&fs))) { __skipf(&fs, 1); }
+
+    /* extract data...
+     * */
+
+    /* ... */
+
+    
+    __freef(&fs);
+
+    if (width)  { *width  = width;  }
+    if (height) { *height = height; }
+    return (0);
+
+__failure:
+    
+    __freef(&fs);
+
+    if (width)  { *width  = 0; }
+    if (height) { *height = 0; }
+    return (0);
+}
 
 
 /* SECTION: image.h api (.png)
