@@ -97,7 +97,6 @@ enum e_pnmtype {
     PNM_PBM = 1,  /* P1, P4 */
     PNM_PGM = 2,  /* P2, P5 */
     PNM_PPM = 3,  /* P3, P6 */
-    PNM_PAM = 4,  /* P7 */
 
     /* ... */
 
@@ -105,27 +104,26 @@ enum e_pnmtype {
 };
 
 IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
-    if (!path)  { goto __failure; }
-    if (!*path) { goto __failure; }
+    if (!path)  { return (0); }
+    if (!*path) { return (0); }
 
-    FILE *f = fopen(path, "rb");
-    if (!f) { goto __failure; }
+    FILE *file = fopen(path, "rb");
+    if (!file) { return (0); }
 
-    const char *f0 = 0,
-               *f1 = 0;
+    const char *f = 0,
+               *f_ptr = 0;
 
-    f0 = __read(f);
-    if (!f0) { goto __failure; }
-    fclose(f), f = 0;
-    f1 = f0;
+    f = __read(file);
+    if (!f) { return (0); }
+    fclose(file), file = 0;
+    f_ptr = f;
 
-    enum e_pnmtype type = PNM_NONE;
-
-    /* verify signature...
+    /* magic...
      * */
-    while (__isspace(*f1)) { f1++; }
-    if (*f1++ != 'P') { goto __failure; } /* pnm corrupt: no signature */
-    switch (*f1++) {
+    enum e_pnmtype type = { 0 };
+    while (__isspace(*f)) { f++; }
+    if (*f++ != 'P') { return (0); } /* pnm corrupt: no magic */
+    switch (*f++) {
         case ('1'):
         case ('4'): {
             type = PNM_PBM;
@@ -141,89 +139,85 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
             type = PNM_PPM;
         } break;
         
-        case ('7'): {
-            type = PNM_PPM;
-
-            /* TODO: check the official spec for .pam image format
-             *       for now it'll just return a failure
-             * */
-
-            goto __failure;
-        } break;
-
-        default: { goto __failure; }
+        default: { return (0); }
     }
 
-    /* extract width...
+    /* width...
      * */
-    while (*f1 && !__isdigit(*f1)) {
-        /* if comment - ignore the remaining line... */
-        if (*f1 && *f1 == '#') {
-            while (*f1 != '\n') { f1++; }
-
-            continue;
-        }
-
-        f1++;
-    }
-
-    size_t pnm_w = __atoi(f1);
-    if (!pnm_w) { goto __failure; }
-    while (*f1 && __isdigit(*f1)) { f1++; }
+    while (*f && !__isdigit(*f)) { f++; }
+    size_t pnm_w = __atoi(f);
+    if (!pnm_w) { free((void *) f); return (0); }
+    while (*f && !__isspace(*f)) { f++; }
     
-    /* extract height...
+    /* height...
      * */
-    while (*f1 && !__isdigit(*f1)) {
-        /* if comment - ignore the remaining line... */
-        if (*f1 && *f1 == '#') {
-            while (*f1 != '\n') { f1++; }
+    while (*f && !__isdigit(*f)) { f++; }
+    size_t pnm_h = __atoi(f);
+    if (!pnm_h) { free((void *) f); return (0); }
+    while (*f && !__isspace(*f)) { f++; }
 
-            continue;
-        }
-
-        f1++;
+    /* maxval (only for .pgm and .ppm)
+     *        (.pbm defaults to '1')
+     * */
+    size_t maxval = 1;
+    if (type == PNM_PGM || type == PNM_PPM) {
+        while (*f && !__isdigit(*f)) { f++; }
+        maxval = __atoi(f);
+        if (!maxval) { free((void *) f); return (0); }
+        while (*f && !__isspace(*f)) { f++; }
     }
 
-    size_t pnm_h = __atoi(f1);
-    if (!pnm_h) { goto __failure; }
-    while (*f1 && __isdigit(*f1)) { f1++; }
+    /* data...
+     * */
+    size_t i = 0,
+           j = pnm_w * pnm_h * 4;
+    uint8_t *data = malloc(j * sizeof(uint8_t));
+    if (!data) { free((void *) f); return (0); }
+    while (i < j) {
+        switch (type) {
+            case (PNM_PBM):
+            case (PNM_PGM): {
+                while (*f && !__isdigit(*f)) { f++; }
+                uint8_t sample = __atoi(f);
+                if (sample > maxval) {
+                    free((void *) f);
+                    free(data);
 
-    /* extract data... */
-    size_t   size = 0;
-    uint8_t *data = malloc(pnm_w * pnm_h * sizeof(uint8_t)); /* TODO: check the size of the allocated memory if it fits all the data for the specific format */
-    if (!data) { goto __failure; }
-    while (*f1) {
-        /* if comment - ignore the remaining line... */
-        if (*f1 && *f1 == '#') {
-            while (*f1 != '\n') { f1++; }
+                    return (0);
+                }
+                while (*f && !__isspace(*f)) { f++; }
 
-            continue;
-        }
-        
-        /* skip all the whitespaces... */
-        while (*f1 && __isspace(*f1)) { f1++; }
+                data[i++] = sample;
+                data[i++] = sample;
+                data[i++] = sample;
+                data[i++] = 255;
+            } break;
 
-        /* if the current char is a digit, extract it and store it in the 'data'... */
-        if (__isdigit(*f1)) {
-            data[size++] = __atoi(f1);
+            case (PNM_PPM): {
+                for (size_t i = 0; i < 3; i++) {
+                    while (*f && !__isdigit(*f)) { f++; }
+                    uint8_t sample = __atoi(f);
+                    if (sample > maxval) {
+                        free((void *) f);
+                        free(data);
 
-            while (*f1 && !__isspace(*f1)) { f1++; }
-        }
+                        return (0);
+                    }
+
+                    data[i++] = sample;
+                    while (*f && !__isspace(*f)) { f++; }
+                }
+                data[i++] = 255;
+            } break;
+
+            default: { } break;
+        } 
     }
 
-    if (f0) { free((void *) f0); }
-
+    free((void *) f_ptr);
     if (width)  { *width  = pnm_w; }
     if (height) { *height = pnm_h; }
     return (data);
-
-__failure:
-
-    if (f0) { free((void *) f0); }
-
-    if (width)  { *width  = 0; }
-    if (height) { *height = 0; }
-    return (0);
 }
 
 
@@ -286,25 +280,25 @@ static int __png_iend(struct s_png *);
 
 
 IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
-    if (!path)  { goto __failure; }
-    if (!*path) { goto __failure; }
+    if (!path)  { return (0); }
+    if (!*path) { return (0); }
 
-    FILE *f = fopen(path, "rb");
-    if (!f) { goto __failure; }
+    FILE *file = fopen(path, "rb");
+    if (!file) { return (0); }
 
-    const char *f0 = 0,
-               *f1 = 0;
+    const char *f = 0,
+               *f_ptr = 0;
 
-    f0 = __read(f);
-    if (!f0) { goto __failure; }
-    fclose(f), f = 0;
-    f1 = f0;
+    f = __read(file);
+    if (!f) { return (0); }
+    fclose(file), file = 0;
+    f_ptr = f;
 
-    /* file verification...
+    /* signtaure...
      * */
     
-    if (__memcmp(f1, g_sign_png, 8)) { goto __failure; }
-    f1 += 8;
+    if (__memcmp(f, g_sign_png, 8)) { return (0); }
+    f += 8;
 
     /* file parsing...
      * */
@@ -312,34 +306,34 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
     struct s_png png = { 0 };
     struct s_chunk chunk = { 0 };
     while (chunk.type != (uint32_t) __pack32((uint8_t *) "IEND")) {
-        f1 += __png_chunk(&chunk, f1);
+        f += __png_chunk(&chunk, f);
 
         /* IHDR: header */
         if (chunk.type == (uint32_t) __pack32((uint8_t *) "IHDR")) {
             int result = __png_ihdr(&png.ihdr, &chunk);
 
-            if (!result) { goto __failure; }
+            if (!result) { return (0); }
         }
         
         /* PLTE: palette */
         else if (chunk.type == (uint32_t) __pack32((uint8_t *) "PLTE")) {
             int result = __png_plte(&png.plte, &chunk);
 
-            if (!result) { goto __failure; }
+            if (!result) { return (0); }
         }
         
         /* IDAT: data */
         else if (chunk.type == (uint32_t) __pack32((uint8_t *) "IDAT")) {
             int result = __png_idat(&png.idat, &chunk);
 
-            if (!result) { goto __failure; }
+            if (!result) { return (0); }
         }
 
         /* IEND: end */
         else if (chunk.type == (uint32_t) __pack32((uint8_t *) "IEND")) {
             int result = __png_iend(&png);
 
-            if (!result) { goto __failure; }
+            if (!result) { return (0); }
         }
 
         /* OTHER: ancillary */
@@ -348,20 +342,11 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
         if (chunk.data) { free(chunk.data), chunk.data = 0; }
     }
 
-    if (f0) { free((void *) f0); }
+    free((void *) f_ptr);
     if (png.idat.data) { free(png.idat.data); }
 
     if (width)  { *width  = png.ihdr.width;  }
     if (height) { *height = png.ihdr.height; }
-    return (0);
-
-__failure:
-    
-    if (f0) { free((void *) f0); }
-    if (png.idat.data) { free(png.idat.data); }
-
-    if (width)  { *width  = 0; }
-    if (height) { *height = 0; }
     return (0);
 }
 
