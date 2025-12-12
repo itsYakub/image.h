@@ -416,9 +416,9 @@ static int __png_idat(struct s_idat *, struct s_chunk *);
 
 static uint8_t *__png_iend(struct s_png *);
 
-static uint8_t *__png_zlib_decompress(const char *, const size_t, const size_t);
+static uint8_t *__png_zlib_decompress(const uint8_t *, const size_t, const size_t);
 
-static uint8_t *__png_zlib_defilter();
+static uint8_t *__png_zlib_defilter(const uint8_t *, const size_t, const size_t, const size_t);
 
 static uint8_t __png_paeth_predictor(const uint8_t, const uint8_t, const uint8_t);
 
@@ -650,13 +650,17 @@ static uint8_t *__png_iend(struct s_png *png) {
            filtered = height * (1 + scanline);
 
     /* decompression... */
-    char *fdata = __png_decompress(png->idat.data, png->idat.size, filtered);
+    uint8_t *fdata = __png_zlib_decompress(png->idat.data, png->idat.size, filtered);
     if (!fdata) {
         return (0);
     }
 
     /* unfiltering... */
+    uint8_t  *udata = __png_zlib_defilter(fdata, height, scanline, stride);
     free(fdata);
+    if (!udata) {
+        return (0);
+    }
 
     /* final result */
     uint8_t *data = malloc(width * height * 4 * sizeof(uint8_t));
@@ -686,9 +690,9 @@ static uint8_t *__png_iend(struct s_png *png) {
     return (data);
 }
 
-static uint8_t *__png_zlib_decompress(const char *data, const size_t size, const size_t filtered_size) {
+static uint8_t *__png_zlib_decompress(const uint8_t *data, const size_t size, const size_t filtered_size) {
     uint8_t *outdata = malloc(filtered_size * sizeof(uint8_t));
-    if (!fdata) { return (0); }
+    if (!outdata) { return (0); }
 
     z_stream stream = { 0 };
     if (inflateInit(&stream) != Z_OK) {
@@ -696,7 +700,7 @@ static uint8_t *__png_zlib_decompress(const char *data, const size_t size, const
         return (0);
     }
 
-    stream.next_in   = data;
+    stream.next_in   = (uint8_t *) data;
     stream.avail_in  = (uInt) size;
     stream.next_out  = outdata;
     stream.avail_out = (uInt) filtered_size;
@@ -706,7 +710,7 @@ static uint8_t *__png_zlib_decompress(const char *data, const size_t size, const
         free(outdata);
         return (0);
     }
-    if (stream.total_out != filtered) {
+    if (stream.total_out != filtered_size) {
         inflateEnd(&stream);
         free(outdata);
         return (0);
@@ -716,31 +720,27 @@ static uint8_t *__png_zlib_decompress(const char *data, const size_t size, const
     return (outdata);
 }
 
-static uint8_t *__png_zlib_defilter(const uint8_t *data, const size_t width, const size_t height, const size_t scanline, const size_t stride) {
-    uint8_t *udata = malloc(height * scanline * sizeof(uint8_t));
-    if (!udata) {
-        free(fdata);
+static uint8_t *__png_zlib_defilter(const uint8_t *data, const size_t height, const size_t scanline, const size_t stride) {
+    uint8_t *outdata = malloc(height * scanline * sizeof(uint8_t));
+    if (!outdata) {
         return (0);
     }
 
     uint8_t *prev_l = malloc(scanline * sizeof(uint8_t));
     if (!prev_l) {
-        free(udata);
-        free(fdata);
         return (0);
     }
 
     for (size_t y = 0; y < height; y++) {
-        uint8_t type = fdata[y * (1 + scanline)];
+        uint8_t type = data[y * (1 + scanline)];
         if (type > 4) {
             free(prev_l);
-            free(udata);
-            free(fdata);
+            free(outdata);
             return (0);
         }
 
-        uint8_t *curr_l = udata + y * scanline;
-        uint8_t *filt_l = fdata + y * (1 + scanline) + 1;
+        uint8_t *curr_l = outdata + y * scanline;
+        uint8_t *filt_l = (uint8_t *) data + y * (1 + scanline) + 1;
         for (size_t i = 0; i < scanline; i++) {
             uint8_t p = 0;
             uint8_t a = (i >= stride) ? curr_l[i - stride] : 0,
@@ -761,14 +761,13 @@ static uint8_t *__png_zlib_defilter(const uint8_t *data, const size_t width, con
 
         if (!__memcpy(prev_l, curr_l, scanline)) {
             free(prev_l);
-            free(udata);
-            free(fdata);
+            free(outdata);
             return (0);
         }
     }
 
     free(prev_l);
-
+    return (outdata);
 }
 
 static uint8_t __png_paeth_predictor(const uint8_t a, const uint8_t b, const uint8_t c) {
