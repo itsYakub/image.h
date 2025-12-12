@@ -709,6 +709,8 @@ static uint8_t *__png_iend(struct s_png *png) {
                 case (2): { p = b; } break;
                 case (3): { p = (a + b) / 2; } break;
                 case (4): { p = __png_paeth_predictor(a, b, c); } break;
+
+                default: { p = 0; } break;
             }
 
             curr_l[i] = filt_l[i] + p;
@@ -737,11 +739,13 @@ static uint8_t *__png_iend(struct s_png *png) {
         uint8_t *dst = data + y * width * 4;
 
         for (size_t x = 0; x < width; x++) {
-            dst[0] = src[0];
-            dst[1] = channels > 1 ? src[1] : src[0];
-            dst[2] = channels > 1 ? src[2] : src[0];
-            dst[3] = channels > 1 ? src[3] : 255;
+            uint8_t rgba[4];
+            rgba[0] = src[2];
+            rgba[1] = src[1];
+            rgba[2] = src[0];
+            rgba[3] = src[3];
 
+            *((uint32_t *) dst) = __pack32(rgba);
             src += stride;
             dst += 4;
         }
