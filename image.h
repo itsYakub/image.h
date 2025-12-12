@@ -300,10 +300,17 @@ IMGAPI int imageSavePNM(const char *path, const void *data, const int width, con
     }
 
     switch (type) {
-        case (PNM_PBM):
+        case (PNM_PBM): {
+            for (size_t i = 0; i < s; i += 4) {
+                fprintf(f, "%d ", d[i] > 0 ? 1 : 0);
+            }
+        } break;
+
         case (PNM_PGM): {
             for (size_t i = 0; i < s; i += 4) {
-                fprintf(f, "%d ", d[i]);
+                uint8_t sample = (d[i] + d[i + 1] + d[i + 2]) / 3;
+
+                fprintf(f, "%d ", sample);
             }
         } break;
 
@@ -676,9 +683,9 @@ static uint8_t *__png_iend(struct s_png *png) {
         for (size_t x = 0; x < width; x++) {
             uint8_t rgba[4];
             rgba[0] = src[2];
-            rgba[1] = src[1];
-            rgba[2] = src[0];
-            rgba[3] = src[3];
+            rgba[1] = channels == 1 ? src[2] : src[1];
+            rgba[2] = channels == 1 ? src[2] : src[0];
+            rgba[3] = channels != 4 ? 255 : src[3];
 
             *((uint32_t *) dst) = __pack32(rgba);
             src += stride;
