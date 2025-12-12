@@ -20,6 +20,8 @@ extern "C" {
 
 IMGAPI void *imageLoadPNM(const char *, int *, int *);
 
+IMGAPI int imageSavePNM(const char *, const void *, const int, const int);
+
 /* SECTION: image.h api (.png)
  * */
 
@@ -64,7 +66,11 @@ static void *__memdup(const void *, size_t);
 
 static void *__memchr(const void *, const unsigned char, size_t);
 
+static void *__memrchr(const void *, const unsigned char, size_t);
+
 static size_t __strlen(const char *);
+
+static int __strcmp(const char *, const char *);
 
 static int __isinrange(const int32_t, const int32_t [], const size_t);
 
@@ -234,6 +240,81 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
     if (width)  { *width  = pnm_w; }
     if (height) { *height = pnm_h; }
     return (data);
+}
+
+IMGAPI int imageSavePNM(const char *path, const void *data, const int width, const int height) {
+    /* Null-check...
+     * */
+    if (!data) { return (0); }
+    if (!path) { return (0); }
+
+    uint8_t *d = (uint8_t *) data;
+    size_t   s = width * height * 4;
+
+    /* Dimensions check...
+     * */
+    if (!width)  { return (0); }
+    if (!height) { return (0); }
+
+    /* figure-out the file type...
+     * */
+    enum e_pnmtype type = { 0 };
+    const char *ext = __memrchr(path, '.', __strlen(path));
+    if (!ext) { type = PNM_PPM; } /* if no extension found - default to .ppm */
+    else if (!__strcmp(ext, ".pbm")) { type = PNM_PBM; }
+    else if (!__strcmp(ext, ".pgm")) { type = PNM_PGM; }
+    else if (!__strcmp(ext, ".ppm")) { type = PNM_PPM; }
+    else { type = PNM_PPM; } /* if no extension matched - default to .ppm */
+
+    /* figure-out maxval...
+     * */
+    uint8_t maxval = 1;
+    if (type == PNM_PGM || type == PNM_PPM) {
+        for (size_t i = 0; i < s; i++) {
+            if (i % 4 == 0) { continue; }
+
+            maxval = (d[i] > maxval ? d[i] : maxval);
+        }
+    }
+
+    /* Create and fill the image file...
+     * */
+    FILE *f = fopen(path, "wb");
+    if (!f) { return (0); }
+
+    switch (type) {
+        case (PNM_PBM): { fprintf(f, "P1\n"); } break;
+        case (PNM_PGM): { fprintf(f, "P2\n"); } break;
+        case (PNM_PPM): { fprintf(f, "P3\n"); } break;
+        default: { return (0); }
+    }
+
+    fprintf(f, "%d %d\n", width, height);
+    if (type == PNM_PGM || type == PNM_PPM) {
+        fprintf(f, "%d\n", maxval);
+    }
+
+    switch (type) {
+        case (PNM_PBM):
+        case (PNM_PGM): {
+            for (size_t i = 0; i < s; i += 4) {
+                fprintf(f, "%d ", d[i]);
+            }
+        } break;
+
+        case (PNM_PPM): {
+            for (size_t i = 0; i < s; i++) {
+                if (i % 4 == 0) { continue; }
+                
+                fprintf(f, "%d ", d[i]);
+            }
+        } break;
+
+        default: { return (0); }
+    }
+
+    fclose(f);
+    return (1);
 }
 
 
@@ -597,10 +678,23 @@ static void *__memdup(const void *s0, size_t s) {
 
 static void *__memchr(const void *s, const unsigned char c, size_t n) {
     const uint8_t *c0 = (const uint8_t *) s;
+    if (!c0) { return (0); }
 
     while (n--) {
         if (*c0 == c) { return ((void *) c0); }
         c0++;
+    }
+    return (0);
+}
+
+static void *__memrchr(const void *s, const unsigned char c, size_t n) {
+    const uint8_t *c0 = (const uint8_t *) s;
+    if (!c0) { return (0); }
+
+    while (n-- > 0) {
+        if (c0[n] == c) {
+            return ((void *) &c0[n]);
+        }
     }
     return (0);
 }
@@ -610,6 +704,14 @@ static size_t __strlen(const char *s) {
         if (!s[i]) { return (i); }
     }
     return (0);
+}
+
+static int __strcmp(const char *s0, const char *s1) {
+    while (*s0 && *s1 && *s0 == *s1) {
+        s0++;
+        s1++;
+    }
+    return (*s0 - *s1);
 }
 
 static int __isinrange(const int32_t v, const int32_t arr[], const size_t n) {
