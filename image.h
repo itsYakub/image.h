@@ -41,6 +41,10 @@ IMGAPI void *imageLoadPNG(const char *, int *, int *);
 #  include <stdlib.h>
 #  include <string.h>
 #
+#  /* FIXME: replace this dependency with handmade implementation of zlib
+#   * */
+#  include <zlib.h>
+#
 #  if !defined LITTLE_ENDIAN
 #   define LITTLE_ENDIAN (*(uint8_t) &(uint16_t) { 1 })
 #  endif /* LITTLE_ENDIAN */
@@ -54,9 +58,21 @@ extern "C" {
 /* SECTION: static functions
  * */
 
+/* custom */
+
 static inline int32_t __pack16(uint8_t [2]);
 
 static inline int32_t __pack32(uint8_t [4]);
+
+static int __isinrange(const int32_t, const int32_t [], const size_t);
+
+static char *__read(FILE *);
+
+/* math.h */
+
+static uint32_t __abs(const int32_t);
+
+/* string.h */
 
 static int __memcmp(const void *, const void *, size_t);
 
@@ -72,7 +88,7 @@ static size_t __strlen(const char *);
 
 static int __strcmp(const char *, const char *);
 
-static int __isinrange(const int32_t, const int32_t [], const size_t);
+/* stdlib.h */
 
 static int __isspace(int);
 
@@ -80,20 +96,9 @@ static int __isdigit(int);
 
 static int __atoi(const char *);
 
-static char *__read(FILE *);
-
 
 /* SECTION: global objects
  * */
-
-static const uint8_t g_sign_pgm0[] = { 80, 49 },
-                     g_sign_pgm1[] = { 80, 52 };
-
-static const uint8_t g_sign_pbm0[] = { 80, 50 },
-                     g_sign_pbm1[] = { 80, 53 };
-
-static const uint8_t g_sign_ppm0[] = { 80, 51 },
-                     g_sign_ppm1[] = { 80, 54 };
 
 static const uint8_t g_sign_png[] = { 137, 80, 78, 71, 13, 10, 26, 10 };
 
@@ -409,7 +414,9 @@ static int __png_plte(struct s_plte *, struct s_chunk *);
 
 static int __png_idat(struct s_idat *, struct s_chunk *);
 
-static int __png_iend(struct s_png *);
+static uint8_t *__png_iend(struct s_png *);
+
+static uint8_t __png_paeth_predictor(const uint8_t, const uint8_t, const uint8_t);
 
 
 IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
@@ -436,6 +443,7 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
     /* file parsing...
      * */
 
+    uint8_t *data = 0;
     struct s_png png = { 0 };
     struct s_chunk chunk = { 0 };
     while (chunk.type != (uint32_t) __pack32((uint8_t *) "IEND")) {
@@ -464,9 +472,14 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
 
         /* IEND: end */
         else if (chunk.type == (uint32_t) __pack32((uint8_t *) "IEND")) {
-            int result = __png_iend(&png);
+            data = __png_iend(&png);
 
-            if (!result) { return (0); }
+            if (!data) {
+                free(chunk.data);
+                free(png.idat.data);
+                free((void *) f_ptr);
+                return (0);
+            }
         }
 
         /* OTHER: ancillary */
@@ -480,7 +493,7 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
 
     if (width)  { *width  = png.ihdr.width;  }
     if (height) { *height = png.ihdr.height; }
-    return (0);
+    return (data);
 }
 
 
@@ -607,16 +620,147 @@ static int __png_idat(struct s_idat *idat, struct s_chunk *chunk) {
 }
 
 
-static int __png_iend(struct s_png *png) {
+static uint8_t *__png_iend(struct s_png *png) {
     /* null-check...
      * */
     if (!png)            { return (0); }
     if (!png->idat.data) { return (0); }
     if (!png->idat.size) { return (0); }
 
-    return (1);
+    /* FIXME:
+     *  implementation done with grok expert to understand the concept.
+     *  i'll later on replace the ai part with my handmade zlib impl.
+     * */
+    uint8_t channels  = 0;
+    switch (png->ihdr.type) {
+        case (0): { channels = 1; } break;
+        case (2): { channels = 3; } break;
+        case (6): { channels = 4; } break;
+        default:  { return (0); }
+    }
+
+    size_t width  = png->ihdr.width,
+           height = png->ihdr.height,
+           stride = channels;
+    size_t scanline = width * stride,
+           filtered = height * (1 + scanline);
+
+    /* decompression... */
+    uint8_t *fdata = malloc(filtered * sizeof(uint8_t));
+    if (!fdata) { return (0); }
+
+    z_stream stream = { 0 };
+    if (inflateInit(&stream) != Z_OK) {
+        free(fdata);
+        return (0);
+    }
+
+    stream.next_in   = png->idat.data;
+    stream.avail_in  = (uInt) png->idat.size;
+    stream.next_out  = fdata;
+    stream.avail_out = (uInt) filtered;
+
+    if (inflate(&stream, Z_FINISH) != Z_STREAM_END) {
+        inflateEnd(&stream);
+        free(fdata);
+        return (0);
+    }
+    if (stream.total_out != filtered) {
+        inflateEnd(&stream);
+        free(fdata);
+        return (0);
+    }
+
+    inflateEnd(&stream);
+
+    /* unfiltering... */
+    uint8_t *udata = malloc(height * scanline * sizeof(uint8_t));
+    if (!udata) {
+        free(fdata);
+        return (0);
+    }
+
+    uint8_t *prev_l = malloc(scanline * sizeof(uint8_t));
+    if (!prev_l) {
+        free(udata);
+        free(fdata);
+        return (0);
+    }
+
+    for (size_t y = 0; y < height; y++) {
+        uint8_t type = fdata[y * (1 + scanline)];
+        if (type > 4) {
+            free(prev_l);
+            free(udata);
+            free(fdata);
+            return (0);
+        }
+
+        uint8_t *curr_l = udata + y * scanline;
+        uint8_t *filt_l = fdata + y * (1 + scanline) + 1;
+        for (size_t i = 0; i < scanline; i++) {
+            uint8_t p = 0;
+            uint8_t a = (i >= stride) ? curr_l[i - stride] : 0,
+                    b = prev_l[i],
+                    c = (i >= stride) ? prev_l[i - stride] : 0;
+
+            switch (type) {
+                case (1): { p = a; } break;
+                case (2): { p = b; } break;
+                case (3): { p = (a + b) / 2; } break;
+                case (4): { p = __png_paeth_predictor(a, b, c); } break;
+            }
+
+            curr_l[i] = filt_l[i] + p;
+        }
+
+        if (!__memcpy(prev_l, curr_l, scanline)) {
+            free(prev_l);
+            free(udata);
+            free(fdata);
+            return (0);
+        }
+    }
+
+    free(prev_l);
+    free(fdata);
+
+    /* final result */
+    uint8_t *data = malloc(width * height * 4 * sizeof(uint8_t));
+    if (!data) {
+        free(udata);
+        return (0);
+    }
+
+    for (size_t y = 0; y < height; y++) {
+        uint8_t *src = udata + y * scanline;
+        uint8_t *dst = data + y * width * 4;
+
+        for (size_t x = 0; x < width; x++) {
+            dst[0] = src[0];
+            dst[1] = channels > 1 ? src[1] : src[0];
+            dst[2] = channels > 1 ? src[2] : src[0];
+            dst[3] = channels > 1 ? src[3] : 255;
+
+            src += stride;
+            dst += 4;
+        }
+    }
+
+    free(udata);
+    return (data);
 }
 
+static uint8_t __png_paeth_predictor(const uint8_t a, const uint8_t b, const uint8_t c) {
+    int32_t p  = a + b - c,
+            pa = __abs(p - a),
+            pb = __abs(p - b),
+            pc = __abs(p - c);
+
+    if (pa <= pb && pa <= pc) { return (a); }
+    if (pb <= pc)             { return (b); }
+    else                      { return (c); }
+}
 
 
 /* SECTION: static functions
@@ -640,6 +784,36 @@ static inline int32_t __pack32(uint8_t data[4]) {
     return (data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24));
 #  endif /* LITTLE_ENDIAN */
 
+}
+
+static int __isinrange(const int32_t v, const int32_t arr[], const size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        if (v == arr[i]) {
+            return (1);
+        }
+    }
+    return (0);
+}
+
+static char *__read(FILE *f) {
+    /* Null-check...
+     * */
+    if (!f) { return (0); }
+
+    fseek(f, 0, SEEK_END);
+    size_t size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (!size) { return (0); }
+
+    char *data = calloc(size + 1, sizeof(char));
+    if (!data) { return (0); }
+    if (fread(data, sizeof(uint8_t), size, f) != size) { free(data); return (0); }
+
+    return (data);
+}
+
+static uint32_t __abs(const int32_t i) {
+    return (i < 0 ? i * -1 : i);
 }
 
 static int __memcmp(const void *s0, const void *s1, size_t n) {
@@ -714,15 +888,6 @@ static int __strcmp(const char *s0, const char *s1) {
     return (*s0 - *s1);
 }
 
-static int __isinrange(const int32_t v, const int32_t arr[], const size_t n) {
-    for (size_t i = 0; i < n; i++) {
-        if (v == arr[i]) {
-            return (1);
-        }
-    }
-    return (0);
-}
-
 static int __isspace(int c) {
     return ((c >= '\t' && c <= '\r') || c == ' ');
 }
@@ -750,23 +915,6 @@ static int __atoi(const char *str) {
     }
 
     return (value * sign);
-}
-
-static char *__read(FILE *f) {
-    /* Null-check...
-     * */
-    if (!f) { return (0); }
-
-    fseek(f, 0, SEEK_END);
-    size_t size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (!size) { return (0); }
-
-    char *data = calloc(size + 1, sizeof(char));
-    if (!data) { return (0); }
-    if (fread(data, sizeof(uint8_t), size, f) != size) { free(data); return (0); }
-
-    return (data);
 }
 
 #  if defined (__cplusplus)
