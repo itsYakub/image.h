@@ -416,6 +416,10 @@ static int __png_idat(struct s_idat *, struct s_chunk *);
 
 static uint8_t *__png_iend(struct s_png *);
 
+static uint8_t *__png_zlib_decompress(const char *, const size_t, const size_t);
+
+static uint8_t *__png_zlib_defilter();
+
 static uint8_t __png_paeth_predictor(const uint8_t, const uint8_t, const uint8_t);
 
 
@@ -646,34 +650,73 @@ static uint8_t *__png_iend(struct s_png *png) {
            filtered = height * (1 + scanline);
 
     /* decompression... */
-    uint8_t *fdata = malloc(filtered * sizeof(uint8_t));
+    char *fdata = __png_decompress(png->idat.data, png->idat.size, filtered);
+    if (!fdata) {
+        return (0);
+    }
+
+    /* unfiltering... */
+    free(fdata);
+
+    /* final result */
+    uint8_t *data = malloc(width * height * 4 * sizeof(uint8_t));
+    if (!data) {
+        free(udata);
+        return (0);
+    }
+
+    for (size_t y = 0; y < height; y++) {
+        uint8_t *src = udata + y * scanline;
+        uint8_t *dst = data + y * width * 4;
+
+        for (size_t x = 0; x < width; x++) {
+            uint8_t rgba[4];
+            rgba[0] = src[2];
+            rgba[1] = src[1];
+            rgba[2] = src[0];
+            rgba[3] = src[3];
+
+            *((uint32_t *) dst) = __pack32(rgba);
+            src += stride;
+            dst += 4;
+        }
+    }
+
+    free(udata);
+    return (data);
+}
+
+static uint8_t *__png_zlib_decompress(const char *data, const size_t size, const size_t filtered_size) {
+    uint8_t *outdata = malloc(filtered_size * sizeof(uint8_t));
     if (!fdata) { return (0); }
 
     z_stream stream = { 0 };
     if (inflateInit(&stream) != Z_OK) {
-        free(fdata);
+        free(outdata);
         return (0);
     }
 
-    stream.next_in   = png->idat.data;
-    stream.avail_in  = (uInt) png->idat.size;
-    stream.next_out  = fdata;
-    stream.avail_out = (uInt) filtered;
+    stream.next_in   = data;
+    stream.avail_in  = (uInt) size;
+    stream.next_out  = outdata;
+    stream.avail_out = (uInt) filtered_size;
 
     if (inflate(&stream, Z_FINISH) != Z_STREAM_END) {
         inflateEnd(&stream);
-        free(fdata);
+        free(outdata);
         return (0);
     }
     if (stream.total_out != filtered) {
         inflateEnd(&stream);
-        free(fdata);
+        free(outdata);
         return (0);
     }
 
     inflateEnd(&stream);
+    return (outdata);
+}
 
-    /* unfiltering... */
+static uint8_t *__png_zlib_defilter(const uint8_t *data, const size_t width, const size_t height, const size_t scanline, const size_t stride) {
     uint8_t *udata = malloc(height * scanline * sizeof(uint8_t));
     if (!udata) {
         free(fdata);
@@ -725,34 +768,7 @@ static uint8_t *__png_iend(struct s_png *png) {
     }
 
     free(prev_l);
-    free(fdata);
 
-    /* final result */
-    uint8_t *data = malloc(width * height * 4 * sizeof(uint8_t));
-    if (!data) {
-        free(udata);
-        return (0);
-    }
-
-    for (size_t y = 0; y < height; y++) {
-        uint8_t *src = udata + y * scanline;
-        uint8_t *dst = data + y * width * 4;
-
-        for (size_t x = 0; x < width; x++) {
-            uint8_t rgba[4];
-            rgba[0] = src[2];
-            rgba[1] = src[1];
-            rgba[2] = src[0];
-            rgba[3] = src[3];
-
-            *((uint32_t *) dst) = __pack32(rgba);
-            src += stride;
-            dst += 4;
-        }
-    }
-
-    free(udata);
-    return (data);
 }
 
 static uint8_t __png_paeth_predictor(const uint8_t a, const uint8_t b, const uint8_t c) {
