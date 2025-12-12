@@ -62,6 +62,10 @@ static void *__memcpy(void *, const void *, size_t);
 
 static void *__memdup(const void *, size_t);
 
+static void *__memchr(const void *, const unsigned char, size_t);
+
+static size_t __strlen(const char *);
+
 static int __isinrange(const int32_t, const int32_t [], const size_t);
 
 static int __isspace(int);
@@ -103,7 +107,7 @@ enum e_pnmtype {
     PNM_COUNT
 };
 
-static inline char *__pnm_skipComment(const char *); 
+static inline char *__pnm_trim(const char *); 
 
 
 IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
@@ -119,13 +123,22 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
     f = __read(file);
     if (!f) { return (0); }
     fclose(file), file = 0;
-    f_ptr = f;
+
+    /* __pnm_trim returns either:
+     * - original pointer if no comments were found in the file
+     * - new trimmed pointer if any comments were found
+     * */    
+    f_ptr = __pnm_trim(f);
+    if (f_ptr != f) {
+        free((void *) f);
+        f = f_ptr;
+    }
 
     /* magic...
      * */
     enum e_pnmtype type = { 0 };
     while (__isspace(*f)) { f++; }
-    if (*f++ != 'P') { return (0); } /* pnm corrupt: no magic */
+    if (*f++ != 'P') { return (0); }
     switch (*f++) {
         case ('1'):
         case ('4'): {
@@ -145,16 +158,12 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
         default: { return (0); }
     }
 
-    f = __pnm_skipComment(f);
-
     /* width...
      * */
     while (*f && !__isdigit(*f)) { f++; }
     size_t pnm_w = __atoi(f);
     if (!pnm_w) { free((void *) f_ptr); return (0); }
     while (*f && !__isspace(*f)) { f++; }
-
-    f = __pnm_skipComment(f);
     
     /* height...
      * */
@@ -162,8 +171,6 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
     size_t pnm_h = __atoi(f);
     if (!pnm_h) { free((void *) f_ptr); return (0); }
     while (*f && !__isspace(*f)) { f++; }
-
-    f = __pnm_skipComment(f);
 
     /* maxval (only for .pgm and .ppm)
      *        (.pbm defaults to '1')
@@ -175,8 +182,6 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
         if (!maxval) { free((void *) f_ptr); return (0); }
         while (*f && !__isspace(*f)) { f++; }
     }
-
-    f = __pnm_skipComment(f);
 
     /* data...
      * */
@@ -198,8 +203,6 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
                 }
                 while (*f && !__isspace(*f)) { f++; }
 
-                f = __pnm_skipComment(f);
-
                 data[i++] = sample;
                 data[i++] = sample;
                 data[i++] = sample;
@@ -219,8 +222,6 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
 
                     data[i++] = sample;
                     while (*f && !__isspace(*f)) { f++; }
-
-                    f = __pnm_skipComment(f);
                 }
                 data[i++] = 255;
             } break;
@@ -236,18 +237,39 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
 }
 
 
-static inline char *__pnm_skipComment(const char *s) {
+static inline char *__pnm_trim(const char *s) {
     /* Null-check...
      * */
     if (!s)  { return (0); }
     if (!*s) { return (0); }
 
-    while (__isspace(*s)) { s++; }
-    if (*s == '#') {
-        while (*s && *s != '\n') { s++; }
+    /* if no comments found, we don't need to perform any comment trimming...
+     * */
+    if (!__memchr(s, '#', __strlen(s))) { return ((char *) s); }
+
+    /* this is gonna be kind of wasteful on time complexity, but whatever:
+     * - iterate over string to get the size of if without comment lines
+     * - perform single allocation with that size
+     * - iterate again, copying the original string without comment lines
+     * */
+    size_t modlen = 0;
+    for (size_t i = 0; s[i]; i++, modlen++) {
+        if (s[i] == '#') {
+            while (s[i] && s[i] != '\n') { i++; }
+        }
     }
 
-    return ((char *) s);
+    char *news = calloc(modlen + 1, sizeof(char));
+    if (!news) { return (0); }
+
+    for (size_t i = 0; *s; i++, s++) {
+        if (*s == '#') {
+            while (*s && *s != '\n') { s++; }
+        }
+        news[i] = *s;
+    }
+
+    return (news);
 }
 
 
@@ -571,6 +593,23 @@ static void *__memdup(const void *s0, size_t s) {
     if (!c1) { return (0); }
 
     return (__memcpy(c1, c0, s));
+}
+
+static void *__memchr(const void *s, const unsigned char c, size_t n) {
+    const uint8_t *c0 = (const uint8_t *) s;
+
+    while (n--) {
+        if (*c0 == c) { return ((void *) c0); }
+        c0++;
+    }
+    return (0);
+}
+
+static size_t __strlen(const char *s) {
+    for (size_t i = 0; s; i++) {
+        if (!s[i]) { return (i); }
+    }
+    return (0);
 }
 
 static int __isinrange(const int32_t v, const int32_t arr[], const size_t n) {
