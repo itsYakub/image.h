@@ -440,7 +440,7 @@ static int __png_idat(struct s_idat *, struct s_chunk *);
 
 static uint8_t *__png_iend(struct s_png *);
 
-static uint8_t *__png_zlib_deflate(const uint8_t *, const size_t, const size_t);
+static uint8_t *__png_zlib_inflate(const uint8_t *, const size_t, const size_t);
 
 static uint8_t *__png_zlib_unfilter(const uint8_t *, const size_t, const size_t, const size_t);
 
@@ -673,8 +673,8 @@ static uint8_t *__png_iend(struct s_png *png) {
     size_t scanline = width * stride,
            filtered = height * (1 + scanline);
 
-    /* deflate... */
-    uint8_t *fdata = __png_zlib_deflate(png->idat.data, png->idat.size, filtered);
+    /* inflate... */
+    uint8_t *fdata = __png_zlib_inflate(png->idat.data, png->idat.size, filtered);
     if (!fdata) {
         return (0);
     }
@@ -715,7 +715,7 @@ static uint8_t *__png_iend(struct s_png *png) {
 }
 
 
-static uint8_t *__png_zlib_deflate(const uint8_t *data, const size_t size, const size_t filtered_size) {
+static uint8_t *__png_zlib_inflate(const uint8_t *data, const size_t size, const size_t filtered_size) {
     uint8_t *outdata = malloc(filtered_size * sizeof(uint8_t));
     if (!outdata) { return (0); }
 
