@@ -15,6 +15,8 @@ extern "C" {
 
 # endif /* __cplusplus */
 
+
+
 /* SECTION: image.h api (.pnm)
  * */
 
@@ -22,10 +24,14 @@ IMGAPI void *imageLoadPNM(const char *, int *, int *);
 
 IMGAPI int imageSavePNM(const char *, const void *, const int, const int);
 
+
+
 /* SECTION: image.h api (.png)
  * */
 
 IMGAPI void *imageLoadPNG(const char *, int *, int *);
+
+
 
 # if defined (__cplusplus)
 
@@ -54,6 +60,10 @@ IMGAPI void *imageLoadPNG(const char *, int *, int *);
 extern "C" {
 
 #  endif /* __cplusplus */
+
+
+
+
 
 /* SECTION: static functions
  * */
@@ -101,6 +111,9 @@ static int __atoi(const char *);
  * */
 
 static const uint8_t g_sign_png[] = { 137, 80, 78, 71, 13, 10, 26, 10 };
+
+
+
 
 
 /* SECTION: image.h api (.pnm)
@@ -247,6 +260,7 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
     return (data);
 }
 
+
 IMGAPI int imageSavePNM(const char *path, const void *data, const int width, const int height) {
     /* Null-check...
      * */
@@ -367,6 +381,8 @@ static inline char *__pnm_trim(const char *s) {
 
 
 
+
+
 /* SECTION: image.h api (.png)
  * */
 
@@ -413,6 +429,7 @@ struct s_png {
      * */
 };
 
+
 static int __png_chunk(struct s_chunk *, const char *f);
 
 static int __png_ihdr(struct s_ihdr *, struct s_chunk *);
@@ -423,9 +440,9 @@ static int __png_idat(struct s_idat *, struct s_chunk *);
 
 static uint8_t *__png_iend(struct s_png *);
 
-static uint8_t *__png_zlib_decompress(const uint8_t *, const size_t, const size_t);
+static uint8_t *__png_zlib_deflate(const uint8_t *, const size_t, const size_t);
 
-static uint8_t *__png_zlib_defilter(const uint8_t *, const size_t, const size_t, const size_t);
+static uint8_t *__png_zlib_unfilter(const uint8_t *, const size_t, const size_t, const size_t);
 
 static uint8_t __png_paeth_predictor(const uint8_t, const uint8_t, const uint8_t);
 
@@ -656,14 +673,14 @@ static uint8_t *__png_iend(struct s_png *png) {
     size_t scanline = width * stride,
            filtered = height * (1 + scanline);
 
-    /* decompression... */
-    uint8_t *fdata = __png_zlib_decompress(png->idat.data, png->idat.size, filtered);
+    /* deflate... */
+    uint8_t *fdata = __png_zlib_deflate(png->idat.data, png->idat.size, filtered);
     if (!fdata) {
         return (0);
     }
 
-    /* unfiltering... */
-    uint8_t  *udata = __png_zlib_defilter(fdata, height, scanline, stride);
+    /* unfilter... */
+    uint8_t *udata = __png_zlib_unfilter(fdata, height, scanline, stride);
     free(fdata);
     if (!udata) {
         return (0);
@@ -697,7 +714,8 @@ static uint8_t *__png_iend(struct s_png *png) {
     return (data);
 }
 
-static uint8_t *__png_zlib_decompress(const uint8_t *data, const size_t size, const size_t filtered_size) {
+
+static uint8_t *__png_zlib_deflate(const uint8_t *data, const size_t size, const size_t filtered_size) {
     uint8_t *outdata = malloc(filtered_size * sizeof(uint8_t));
     if (!outdata) { return (0); }
 
@@ -727,7 +745,8 @@ static uint8_t *__png_zlib_decompress(const uint8_t *data, const size_t size, co
     return (outdata);
 }
 
-static uint8_t *__png_zlib_defilter(const uint8_t *data, const size_t height, const size_t scanline, const size_t stride) {
+
+static uint8_t *__png_zlib_unfilter(const uint8_t *data, const size_t height, const size_t scanline, const size_t stride) {
     uint8_t *outdata = malloc(height * scanline * sizeof(uint8_t));
     if (!outdata) {
         return (0);
@@ -777,6 +796,7 @@ static uint8_t *__png_zlib_defilter(const uint8_t *data, const size_t height, co
     return (outdata);
 }
 
+
 static uint8_t __png_paeth_predictor(const uint8_t a, const uint8_t b, const uint8_t c) {
     int32_t p  = a + b - c,
             pa = __abs(p - a),
@@ -787,6 +807,9 @@ static uint8_t __png_paeth_predictor(const uint8_t a, const uint8_t b, const uin
     if (pb <= pc)             { return (b); }
     else                      { return (c); }
 }
+
+
+
 
 
 /* SECTION: static functions
@@ -802,6 +825,7 @@ static inline int32_t __pack16(uint8_t data[2]) {
 
 }
 
+
 static inline int32_t __pack32(uint8_t data[4]) {
 
 #  if (LITTLE_ENDIAN)
@@ -812,6 +836,7 @@ static inline int32_t __pack32(uint8_t data[4]) {
 
 }
 
+
 static int __isinrange(const int32_t v, const int32_t arr[], const size_t n) {
     for (size_t i = 0; i < n; i++) {
         if (v == arr[i]) {
@@ -820,6 +845,7 @@ static int __isinrange(const int32_t v, const int32_t arr[], const size_t n) {
     }
     return (0);
 }
+
 
 static char *__read(FILE *f) {
     /* Null-check...
@@ -838,9 +864,11 @@ static char *__read(FILE *f) {
     return (data);
 }
 
+
 static uint32_t __abs(const int32_t i) {
     return (i < 0 ? i * -1 : i);
 }
+
 
 static int __memcmp(const void *s0, const void *s1, size_t n) {
     const uint8_t *c0 = (uint8_t *) s0,
@@ -854,6 +882,7 @@ static int __memcmp(const void *s0, const void *s1, size_t n) {
     return (0);
 }
 
+
 static void *__memcpy(void *dst, const void *src, size_t n) {
     uint8_t *c0 = (uint8_t *) src,
             *c1 = (uint8_t *) dst;
@@ -863,6 +892,7 @@ static void *__memcpy(void *dst, const void *src, size_t n) {
     }
     return (dst);
 }
+
 
 static void *__memdup(const void *s0, size_t s) {
     if (!s0) { return (0); }
@@ -876,6 +906,7 @@ static void *__memdup(const void *s0, size_t s) {
     return (__memcpy(c1, c0, s));
 }
 
+
 static void *__memchr(const void *s, const unsigned char c, size_t n) {
     const uint8_t *c0 = (const uint8_t *) s;
     if (!c0) { return (0); }
@@ -886,6 +917,7 @@ static void *__memchr(const void *s, const unsigned char c, size_t n) {
     }
     return (0);
 }
+
 
 static void *__memrchr(const void *s, const unsigned char c, size_t n) {
     const uint8_t *c0 = (const uint8_t *) s;
@@ -899,12 +931,14 @@ static void *__memrchr(const void *s, const unsigned char c, size_t n) {
     return (0);
 }
 
+
 static size_t __strlen(const char *s) {
     for (size_t i = 0; s; i++) {
         if (!s[i]) { return (i); }
     }
     return (0);
 }
+
 
 static int __strcmp(const char *s0, const char *s1) {
     while (*s0 && *s1 && *s0 == *s1) {
@@ -914,13 +948,16 @@ static int __strcmp(const char *s0, const char *s1) {
     return (*s0 - *s1);
 }
 
+
 static int __isspace(int c) {
     return ((c >= '\t' && c <= '\r') || c == ' ');
 }
 
+
 static int __isdigit(int c) {
     return (c >= '0' && c <= '9');
 }
+
 
 static int __atoi(const char *str) {
     while (__isspace(*str)) { str++; }
@@ -946,6 +983,7 @@ static int __atoi(const char *str) {
 #  if defined (__cplusplus)
 
 }
+
 
 #  endif /* __cplusplus */
 #
