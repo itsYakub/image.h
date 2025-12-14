@@ -26,6 +26,7 @@ int main(void) {
 - **[PNG - Wikipedia](https://en.wikipedia.org/wiki/PNG)**
 - **[Implementing a Basic PNG reader the handmade way](https://handmade.network/forums/articles/t/2363-implementing_a_basic_png_reader_the_handmade_way)**
 - **[How PNG Works: Compromising Speed for Quality - Reducible](https://youtu.be/EFUYNoFRHQI)**
+- **[Deflate (zlib) compressed data format](https://github.com/libyal/assorted/blob/main/documentation/Deflate%20(zlib)%20compressed%20data%20format.asciidoc)**
 
 - **[PPM - Netpbm color image format](https://netpbm.sourceforge.net/doc/ppm.html)**
 - **[Portable anymap](https://pl.wikipedia.org/wiki/Portable_anymap)**

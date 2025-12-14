@@ -429,6 +429,33 @@ struct s_png {
      * */
 };
 
+/* Structure of zlib block:
+ *
+ * + - +
+ * |...| <- one-byte block (8bit)
+ * + - +
+ *
+ * + - + - + - + - +
+ * |...|...|...|...| <- four-byte block (32bit)
+ * + - + - + - + - +
+ * 
+ * + - + - + ------------------ + - + - + - + - +
+ * |CMF|FLG| compressed data... | ..|.ad|ler|32  |
+ * + - + - + ------------------ + - + - + - + - +
+ * */
+struct s_zlib {
+    uint8_t cmf;    /* cmf - compression method and flags (8bit):
+                     *  > bits from 0 to 3: CM    - compression method (4bits)
+                     *  > bits from 4 to 7: CINFO - compression info (4bits)
+                     * */
+
+    uint8_t flg;    /* flg - flags (8bit):
+                     *  > bits from 0 to 4: FCHECK - check bits for CMF and FLG (5bits)
+                     *  >            bit 5: FDICT  - preset dictionary (1bit)
+                     *  > bits from 6 to 7: FLEVEL - compression level (2bits)
+                     * */
+};
+
 
 static int __png_chunk(struct s_chunk *, const char *f);
 
@@ -655,10 +682,6 @@ static uint8_t *__png_iend(struct s_png *png) {
     if (!png->idat.data) { return (0); }
     if (!png->idat.size) { return (0); }
 
-    /* FIXME:
-     *  implementation done with grok expert to understand the concept.
-     *  i'll later on replace the ai part with my handmade zlib impl.
-     * */
     uint8_t channels  = 0;
     switch (png->ihdr.type) {
         case (0): { channels = 1; } break;
@@ -680,37 +703,12 @@ static uint8_t *__png_iend(struct s_png *png) {
     }
 
     /* unfilter... */
-    uint8_t *udata = __png_zlib_unfilter(fdata, height, scanline, stride);
+    uint8_t *data = __png_zlib_unfilter(fdata, height, scanline, stride);
     free(fdata);
-    if (!udata) {
-        return (0);
-    }
-
-    /* final result */
-    uint8_t *data = malloc(width * height * 4 * sizeof(uint8_t));
     if (!data) {
-        free(udata);
         return (0);
     }
 
-    for (size_t y = 0; y < height; y++) {
-        uint8_t *src = udata + y * scanline;
-        uint8_t *dst = data + y * width * 4;
-
-        for (size_t x = 0; x < width; x++) {
-            uint8_t rgba[4];
-            rgba[0] = src[2];
-            rgba[1] = channels == 1 ? src[2] : src[1];
-            rgba[2] = channels == 1 ? src[2] : src[0];
-            rgba[3] = channels != 4 ? 255 : src[3];
-
-            *((uint32_t *) dst) = __pack32(rgba);
-            src += stride;
-            dst += 4;
-        }
-    }
-
-    free(udata);
     return (data);
 }
 
@@ -719,29 +717,6 @@ static uint8_t *__png_zlib_inflate(const uint8_t *data, const size_t size, const
     uint8_t *outdata = malloc(filtered_size * sizeof(uint8_t));
     if (!outdata) { return (0); }
 
-    z_stream stream = { 0 };
-    if (inflateInit(&stream) != Z_OK) {
-        free(outdata);
-        return (0);
-    }
-
-    stream.next_in   = (uint8_t *) data;
-    stream.avail_in  = (uInt) size;
-    stream.next_out  = outdata;
-    stream.avail_out = (uInt) filtered_size;
-
-    if (inflate(&stream, Z_FINISH) != Z_STREAM_END) {
-        inflateEnd(&stream);
-        free(outdata);
-        return (0);
-    }
-    if (stream.total_out != filtered_size) {
-        inflateEnd(&stream);
-        free(outdata);
-        return (0);
-    }
-
-    inflateEnd(&stream);
     return (outdata);
 }
 
