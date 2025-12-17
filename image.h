@@ -45,11 +45,6 @@ IMGAPI void *imageLoadPNG(const char *, int *, int *);
 #  include <stdint.h>
 #  include <stddef.h>
 #  include <stdlib.h>
-#  include <string.h>
-#
-#  /* FIXME: replace this dependency with handmade implementation of zlib
-#   * */
-#  include <zlib.h>
 #
 #  if !defined LITTLE_ENDIAN
 #   define LITTLE_ENDIAN (*(uint8_t) &(uint16_t) { 1 })
@@ -391,6 +386,10 @@ struct s_chunk {
     uint32_t  crc;
 };
 
+static int __png_chunk(struct s_chunk *, const char *f);
+
+static int __png_chunk_free(struct s_chunk *);
+
 
 struct s_ihdr {
     uint32_t width;
@@ -403,17 +402,9 @@ struct s_ihdr {
     uint8_t interlace;
 };
 
+static int __png_ihdr(struct s_ihdr *, struct s_chunk *);
 
-struct s_plte {
-    uint8_t data[256 * 4];
-    size_t  size;
-};
-
-
-struct s_idat {
-    uint8_t *data;
-    size_t   size;
-};
+static uint8_t *__png_idat(struct s_ihdr *, const uint8_t *, const size_t);
 
 
 struct s_zlib_cmf {
@@ -424,30 +415,23 @@ struct s_zlib_cmf {
 
 struct s_zlib_flg {
     uint8_t fcheck: 5;  /* (5bit: 0 - 4) fcheck - check bits for CMF and FLG ((CMF * 256 + FLG) % 31 == 0) */
-    uint8_t fdict: 1;   /*     (1bit: 5) fdict  - if set, DICT dictionary is present immediately after the FLG byte */
+    uint8_t fdict: 1;   /* (1bit: 5 - 5) fdict  - if set, DICT dictionary is present immediately after the FLG byte */
     uint8_t flevel: 2;  /* (2bit: 6 - 7) flevel - compression level */
 };
 
 
-struct s_zlib_header {
-    struct s_zlib_cmf cmf;
-    struct s_zlib_flg flg;
+struct s_zlib_block_header {
+    uint8_t bfinal: 1;  /* (1bit: 0 - 0) bfinal - marks if this is the last zlib block  */
+    uint8_t btype: 2;   /* (2bit: 1 - 2) btype  - compression type */
 };
 
+static uint8_t *__png_zlib_inflate(uint8_t *, const size_t);
 
-static int __png_chunk(struct s_chunk *, const char *f);
+static uint8_t *__png_zlib_inflate_no_compression(uint8_t **, uint8_t *, const size_t *);
 
-static int __png_chunk_free(struct s_chunk *);
+static uint8_t *__png_zlib_inflate_fixed_huffman(uint8_t **, uint8_t *, const size_t *);
 
-static int __png_ihdr(struct s_ihdr *, struct s_chunk *);
-
-static int __png_plte(struct s_plte *, struct s_chunk *);
-
-static int __png_idat(struct s_idat *, struct s_chunk *);
-
-static int __png_idat_free(struct s_idat *);
-
-static uint8_t *__png_iend(struct s_ihdr *, struct s_plte *, struct s_idat *);
+static uint8_t *__png_zlib_inflate_dynamic_huffman(uint8_t **, uint8_t *, const size_t *);
 
 
 IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
@@ -475,8 +459,6 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
      * */
 
     struct s_ihdr ihdr = { 0 };
-    struct s_plte plte = { 0 };
-    struct s_idat idat = { 0 };
     struct s_chunk chunk = { 0 };
     while (chunk.type != (uint32_t) __pack32((uint8_t *) "IEND")) {
         f += __png_chunk(&chunk, f);
@@ -491,42 +473,24 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
             }
         }
         
-        /* PLTE: palette */
-        else if (chunk.type == (uint32_t) __pack32((uint8_t *) "PLTE")) {
-            int result = __png_plte(&plte, &chunk);
-
-            if (!result) {
-                __png_chunk_free(&chunk);
-                break;
-            }
-        }
-        
         /* IDAT: data */
         else if (chunk.type == (uint32_t) __pack32((uint8_t *) "IDAT")) {
-            int result = __png_idat(&idat, &chunk);
+            uint8_t *result = __png_idat(&ihdr, chunk.data, chunk.length);
 
             if (!result) {
                 __png_chunk_free(&chunk);
                 break;
             }
+
+            /* ... */
+
+            /* FIXME: we should store the 'result' somewhere and realloc it on every 'IDAT' occurance
+             * */
+            free(result);
         }
 
         /* IEND: end */
-        else if (chunk.type == (uint32_t) __pack32((uint8_t *) "IEND")) {
-            uint8_t *data = __png_iend(&ihdr, &plte, &idat);
-            
-            if (!data) {
-                __png_chunk_free(&chunk);
-                break;
-            }
-
-            free(f_ptr);
-            __png_idat_free(&idat);
-            __png_chunk_free(&chunk);
-            if (width)  { *width  = ihdr.width;  }
-            if (height) { *height = ihdr.height; }
-            return (data);
-        }
+        else if (chunk.type == (uint32_t) __pack32((uint8_t *) "IEND")) { break; }
 
         /* OTHER: ancillary */
         else { }
@@ -535,10 +499,8 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
     }
 
     free(f_ptr);
-    __png_idat_free(&idat);
-    __png_chunk_free(&chunk);
-    if (width)  { *width  = 0; }
-    if (height) { *height = 0; }
+    if (width)  { *width  = ihdr.width; }
+    if (height) { *height = ihdr.height; }
     return (0);
 }
 
@@ -637,76 +599,10 @@ static int __png_ihdr(struct s_ihdr *ihdr, struct s_chunk *chunk) {
 }
 
 
-static int __png_plte(struct s_plte *plte, struct s_chunk *chunk) {
+static uint8_t *__png_idat(struct s_ihdr *ihdr, const uint8_t *indata, const size_t insize) {
     /* null-check...
      * */
-    if (!plte)  { return (0); }
-    if (!chunk) { return (0); }
-
-    size_t length = chunk->length;
-    if (length >= 256 * 3) { return (0); }
-    
-    plte->size = length / 3.0;
-    if (plte->size * 3 != length) { return (0); }
-
-    uint8_t *data0 = plte->data,
-            *data1 = chunk->data;
-    if (!data0) { return (0); }
-    if (!data1) { return (0); }
-
-    for (size_t i = 0; i < plte->size; i++) {
-        *data0++ = *data1++;
-        *data0++ = *data1++;
-        *data0++ = *data1++;
-        *data0++ = 255;
-    }
-
-    return (1);
-}
-
-
-static int __png_idat(struct s_idat *idat, struct s_chunk *chunk) {
-    /* null-check...
-     * */
-    if (!idat)  { return (0); }
-    if (!chunk) { return (0); }
-
-    /* Extract the PNG data...
-     * */
-    size_t length0 = idat->size,
-           length1 = chunk->length;
-    if (!length1) { return (0); }
-    if (length1 > (1u << 30)) { return (0); }
-
-    uint8_t *outdata = realloc(idat->data, (length0 + length1) * sizeof(uint8_t));
-    if (!outdata) { return (0); }
-    if (!__memcpy(outdata + length0, chunk->data, length1)) { return (0); }
-
-    idat->data = outdata;
-    idat->size += length1;
-    return (1);
-}
-
-
-static int __png_idat_free(struct s_idat *idat) {
-    /* null-check...
-     * */
-    if (!idat)  { return (0); }
-
-    if (idat->data) { free(idat->data), idat->data = 0; }
-    if (idat->size) { idat->size = 0; }
-    return (1);
-}
-
-
-static uint8_t *__png_iend(struct s_ihdr *ihdr, struct s_plte *plte, struct s_idat *idat) {
-    /* null-check...
-     * */
-    if (!ihdr) { return (0); }
-    if (!plte) { return (0); }
-    if (!idat) { return (0); }
-
-    uint8_t *indata = idat->data;
+    if (!ihdr)   { return (0); }
     if (!indata) { return (0); }
 
     struct s_zlib_cmf cmf = {
@@ -715,8 +611,8 @@ static uint8_t *__png_iend(struct s_ihdr *ihdr, struct s_plte *plte, struct s_id
     };
     printf("indata: %b\n", *indata);
     printf("cmf: %b\n", cmf);
-    printf("> cm: %d\n", cmf.cm);
-    printf("> cinfo: %b\n", cmf.cinfo);
+    printf("> cm: %d (%b)\n", cmf.cm, cmf.cm);
+    printf("> cinfo: %d (%b)\n", cmf.cinfo, cmf.cinfo);
 
     indata++;
 
@@ -727,17 +623,80 @@ static uint8_t *__png_iend(struct s_ihdr *ihdr, struct s_plte *plte, struct s_id
     };
     printf("indata: %b\n", *indata);
     printf("flg: %b\n", flg);
-    printf("> fcheck: %d\n", flg.fcheck);
-    printf("> fdict: %d\n", flg.fdict);
-    printf("> flevel: %d\n", flg.flevel);
+    printf("> fcheck: %d (%b)\n", flg.fcheck, flg.fcheck);
+    printf("> fdict: %d (%b)\n", flg.fdict, flg.fdict);
+    printf("> flevel: %d (%b)\n", flg.flevel, flg.flevel);
 
-    struct s_zlib_header header = { .cmf = cmf, .flg = flg };
-    printf("%b\n", header);
-
-    uint8_t *data = 0;
+    uint8_t *data = __png_zlib_inflate(++indata, insize - 2);
     if (!data) { return (0); }
 
+    /* ... */
+
     return (data);
+}
+
+
+static uint8_t *__png_zlib_inflate(uint8_t *indata, const size_t insize) {
+    /* null-check...
+     * */
+    if (!indata) { return (0); }
+
+    uint8_t *outdata = 0;
+    size_t   outsize = 0;
+
+    struct s_zlib_block_header block_header = { 0 };
+    do {
+        /* extract the block header from the current byte... */
+        block_header.bfinal = *indata, *indata >>= 1;
+        block_header.btype  = *indata, *indata >>= 2;
+
+        switch (block_header.btype) {
+            /* 00 - no compression */
+            case (0): {
+                outdata = __png_zlib_inflate_no_compression(&indata, outdata, &outsize);
+            } break;
+
+            /* 01 - compressed with fixed Huffman codes */
+            case (1): {
+                outdata = __png_zlib_inflate_fixed_huffman(&indata, outdata, &outsize);
+            } break;
+
+            /* 10 - compressed with dynamic Huffman codes */
+            case (2): {
+                outdata = __png_zlib_inflate_dynamic_huffman(&indata, outdata, &outsize);
+            } break;
+
+            /* 11 - reserved (error) */
+            case (3): { }
+        }
+    } while (!block_header.bfinal);
+    /* iterate over the zlib block until BFINAL isn't set... */
+
+    return (outdata);
+}
+
+
+static uint8_t *__png_zlib_inflate_no_compression(uint8_t **src, uint8_t *dst, const size_t *size) {
+    /* TODO: implement */
+
+    uint16_t len  = **src; **src >>= 16;
+    uint16_t nlen = **src; **src >>= 16;
+
+    return (dst);
+}
+
+
+static uint8_t *__png_zlib_inflate_fixed_huffman(uint8_t **src, uint8_t *dst, const size_t *size) {
+    /* TODO: implement */
+    
+    return (dst);
+}
+
+
+static uint8_t *__png_zlib_inflate_dynamic_huffman(uint8_t **src, uint8_t *dst, const size_t *size) {
+    /* TODO: implement */
+    
+    return (dst);
 }
 
 
@@ -818,6 +777,7 @@ static void *__memcpy(void *dst, const void *src, size_t n) {
 
 static void *__memdup(const void *s0, size_t s) {
     if (!s0) { return (0); }
+    if (!s)  { return (0); }
 
     uint8_t *c0 = (uint8_t *) s0,
             *c1 = (uint8_t *) 0;
