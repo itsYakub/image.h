@@ -416,25 +416,22 @@ struct s_idat {
 };
 
 
-struct s_zlib {
-    uint8_t cmf;    /* cmf - compression method and flags (8bit):
-                     *  > bits from 0 to 3: CM    - compression method (4bits)
-                     *  > bits from 4 to 7: CINFO - compression info (4bits)
-                     * */
+struct s_zlib_cmf {
+    uint8_t cm: 4;      /* (4bit: 0 - 3) CM    - compression method */
+    uint8_t cinfo: 4;   /* (4bit: 4 - 7) cinfo - compression info */
+};
 
-    uint8_t flg;    /* flg - flags (8bit):
-                     *  > bits from 0 to 4: FCHECK - check bits for CMF and FLG (5bits)
-                     *  >            bit 5: FDICT  - preset dictionary (1bit)
-                     *  > bits from 6 to 7: FLEVEL - compression level (2bits)
-                     * */
 
-    uint32_t fdict; /* fdict - preset dictionary identifier (32bits)
-                     * */
+struct s_zlib_flg {
+    uint8_t fcheck: 5;  /* (5bit: 0 - 4) fcheck - check bits for CMF and FLG ((CMF * 256 + FLG) % 31 == 0) */
+    uint8_t fdict: 1;   /*     (1bit: 5) fdict  - if set, DICT dictionary is present immediately after the FLG byte */
+    uint8_t flevel: 2;  /* (2bit: 6 - 7) flevel - compression level */
+};
 
-    uint8_t *data;  /* data - compressed data (n-bits):
-                     *  > bits from 0 to n - 32: compressed data (n - 32 bits)
-                     *  > bits from n - 32 to n: checksum (adler32 of compressed data)
-                     * */
+
+struct s_zlib_header {
+    struct s_zlib_cmf cmf;
+    struct s_zlib_flg flg;
 };
 
 
@@ -451,12 +448,6 @@ static int __png_idat(struct s_idat *, struct s_chunk *);
 static int __png_idat_free(struct s_idat *);
 
 static uint8_t *__png_iend(struct s_ihdr *, struct s_plte *, struct s_idat *);
-
-static uint8_t *__png_zlib_inflate(const uint8_t *, const size_t, const size_t);
-
-static uint8_t *__png_zlib_unfilter(const uint8_t *, const size_t, const size_t, const size_t);
-
-static uint8_t __png_paeth_predictor(const uint8_t, const uint8_t, const uint8_t);
 
 
 IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
@@ -715,107 +706,38 @@ static uint8_t *__png_iend(struct s_ihdr *ihdr, struct s_plte *plte, struct s_id
     if (!plte) { return (0); }
     if (!idat) { return (0); }
 
-    uint8_t channels  = 0;
-    switch (ihdr->type) {
-        case (0): { channels = 1; } break;
-        case (2): { channels = 3; } break;
-        case (6): { channels = 4; } break;
-        default:  { return (0); }
-    }
+    uint8_t *indata = idat->data;
+    if (!indata) { return (0); }
 
-    size_t width  = ihdr->width,
-           height = ihdr->height,
-           stride = channels;
-    size_t scanline = width * stride,
-           filtered = height * (1 + scanline);
+    struct s_zlib_cmf cmf = {
+        .cm = *indata,
+        .cinfo = *indata >> 4
+    };
+    printf("indata: %b\n", *indata);
+    printf("cmf: %b\n", cmf);
+    printf("> cm: %d\n", cmf.cm);
+    printf("> cinfo: %b\n", cmf.cinfo);
 
-    /* inflate... */
-    uint8_t *data0 = __png_zlib_inflate(idat->data, idat->size, filtered);
-    if (!data0) {
-        return (0);
-    }
+    indata++;
 
-    /* unfilter... */
-    uint8_t *data1 = __png_zlib_unfilter(data0, height, scanline, stride);
-    free(data0);
-    if (!data1) {
-        return (0);
-    }
+    struct s_zlib_flg flg = {
+        .fcheck = *indata,
+        .fdict = *indata >> 5,
+        .flevel = *indata >> 6
+    };
+    printf("indata: %b\n", *indata);
+    printf("flg: %b\n", flg);
+    printf("> fcheck: %d\n", flg.fcheck);
+    printf("> fdict: %d\n", flg.fdict);
+    printf("> flevel: %d\n", flg.flevel);
 
-    return (data1);
-}
+    struct s_zlib_header header = { .cmf = cmf, .flg = flg };
+    printf("%b\n", header);
 
+    uint8_t *data = 0;
+    if (!data) { return (0); }
 
-static uint8_t *__png_zlib_inflate(const uint8_t *indata, const size_t size, const size_t filtered_size) {
-    (void) indata;
-    (void) size;
-    uint8_t *outdata = malloc(filtered_size * sizeof(uint8_t));
-    if (!outdata) { return (0); }
-
-    return (outdata);
-}
-
-
-static uint8_t *__png_zlib_unfilter(const uint8_t *indata, const size_t height, const size_t scanline, const size_t stride) {
-    uint8_t *outdata = malloc(height * scanline * sizeof(uint8_t));
-    if (!outdata) {
-        return (0);
-    }
-
-    uint8_t *prev_l = malloc(scanline * sizeof(uint8_t));
-    if (!prev_l) {
-        return (0);
-    }
-
-    for (size_t y = 0; y < height; y++) {
-        uint8_t type = indata[y * (1 + scanline)];
-        if (type > 4) {
-            free(prev_l);
-            free(outdata);
-            return (0);
-        }
-
-        uint8_t *curr_l = outdata + y * scanline;
-        uint8_t *filt_l = (uint8_t *) indata + y * (1 + scanline) + 1;
-        for (size_t i = 0; i < scanline; i++) {
-            uint8_t p = 0;
-            uint8_t a = (i >= stride) ? curr_l[i - stride] : 0,
-                    b = prev_l[i],
-                    c = (i >= stride) ? prev_l[i - stride] : 0;
-
-            switch (type) {
-                case (1): { p = a; } break;
-                case (2): { p = b; } break;
-                case (3): { p = (a + b) / 2; } break;
-                case (4): { p = __png_paeth_predictor(a, b, c); } break;
-
-                default: { p = 0; } break;
-            }
-
-            curr_l[i] = filt_l[i] + p;
-        }
-
-        if (!__memcpy(prev_l, curr_l, scanline)) {
-            free(prev_l);
-            free(outdata);
-            return (0);
-        }
-    }
-
-    free(prev_l);
-    return (outdata);
-}
-
-
-static uint8_t __png_paeth_predictor(const uint8_t a, const uint8_t b, const uint8_t c) {
-    int32_t p  = a + b - c,
-            pa = __abs(p - a),
-            pb = __abs(p - b),
-            pc = __abs(p - c);
-
-    if (pa <= pb && pa <= pc) { return (a); }
-    if (pb <= pc)             { return (b); }
-    else                      { return (c); }
+    return (data);
 }
 
 
