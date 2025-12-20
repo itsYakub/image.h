@@ -20,7 +20,7 @@ extern "C" {
 /* SECTION: image.h api (.pnm)
  * */
 
-IMGAPI void *imageLoadPNM(const char *, int *, int *);
+IMGAPI unsigned char *imageLoadPNM(const char *, int *, int *);
 
 IMGAPI int imageSavePNM(const char *, const void *, const int, const int);
 
@@ -29,7 +29,7 @@ IMGAPI int imageSavePNM(const char *, const void *, const int, const int);
 /* SECTION: image.h api (.png)
  * */
 
-IMGAPI void *imageLoadPNG(const char *, int *, int *);
+IMGAPI unsigned char *imageLoadPNG(const char *, int *, int *);
 
 
 
@@ -65,39 +65,39 @@ extern "C" {
 
 /* custom */
 
-static inline uint32_t __pack16(uint8_t [2]);
+static inline uint32_t __png_pack16(uint8_t [2]);
 
-static inline uint32_t __pack32(uint8_t [4]);
+static inline uint32_t __png_pack32(uint8_t [4]);
 
-static char *__read(FILE *);
+static inline char *__png_read(FILE *);
 
 /* math.h */
 
-static uint32_t __abs(const int32_t);
+static inline uint32_t __png_abs(const int32_t);
 
 /* string.h */
 
-static int __memcmp(const void *, const void *, size_t);
+static inline int __png_memcmp(const void *, const void *, size_t);
 
-static void *__memcpy(void *, const void *, size_t);
+static inline void *__png_memcpy(void *, const void *, size_t);
 
-static void *__memdup(const void *, size_t);
+static inline void *__png_memdup(const void *, size_t);
 
-static void *__memchr(const void *, const unsigned char, size_t);
+static inline void *__png_memchr(const void *, const unsigned char, size_t);
 
-static void *__memrchr(const void *, const unsigned char, size_t);
+static inline void *__png_memrchr(const void *, const unsigned char, size_t);
 
-static size_t __strlen(const char *);
+static inline size_t __png_strlen(const char *);
 
-static int __strcmp(const char *, const char *);
+static inline int __png_strcmp(const char *, const char *);
 
 /* stdlib.h */
 
-static int __isspace(int);
+static inline int __png_isspace(int);
 
-static int __isdigit(int);
+static inline int __png_isdigit(int);
 
-static int __atoi(const char *);
+static inline int __png_atoi(const char *);
 
 
 /* SECTION: global objects
@@ -127,7 +127,7 @@ enum e_pnmtype {
 static inline char *__pnm_trim(const char *); 
 
 
-IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
+IMGAPI unsigned char *imageLoadPNM(const char *path, int *width, int *height) {
     if (!path)  { return (0); }
     if (!*path) { return (0); }
 
@@ -137,7 +137,7 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
     char *f = 0,
          *f_ptr = 0;
 
-    f = __read(file);
+    f = __png_read(file);
     if (!f) { return (0); }
     fclose(file), file = 0;
 
@@ -153,8 +153,8 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
 
     /* magic...
      * */
-    enum e_pnmtype type = { 0 };
-    while (__isspace(*f)) { f++; }
+    enum e_pnmtype type = PNM_NONE;
+    while (__png_isspace(*f)) { f++; }
     if (*f++ != 'P') { return (0); }
     switch (*f++) {
         case ('1'):
@@ -177,48 +177,48 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
 
     /* width...
      * */
-    while (*f && !__isdigit(*f)) { f++; }
-    size_t pnm_w = __atoi(f);
+    while (*f && !__png_isdigit(*f)) { f++; }
+    size_t pnm_w = __png_atoi(f);
     if (!pnm_w) { free(f_ptr); return (0); }
-    while (*f && !__isspace(*f)) { f++; }
+    while (*f && !__png_isspace(*f)) { f++; }
     
     /* height...
      * */
-    while (*f && !__isdigit(*f)) { f++; }
-    size_t pnm_h = __atoi(f);
+    while (*f && !__png_isdigit(*f)) { f++; }
+    size_t pnm_h = __png_atoi(f);
     if (!pnm_h) { free(f_ptr); return (0); }
-    while (*f && !__isspace(*f)) { f++; }
+    while (*f && !__png_isspace(*f)) { f++; }
 
     /* maxval (only for .pgm and .ppm)
      *        (.pbm defaults to '1')
      * */
     size_t maxval = 1;
     if (type == PNM_PGM || type == PNM_PPM) {
-        while (*f && !__isdigit(*f)) { f++; }
-        maxval = __atoi(f);
+        while (*f && !__png_isdigit(*f)) { f++; }
+        maxval = __png_atoi(f);
         if (!maxval) { free(f_ptr); return (0); }
-        while (*f && !__isspace(*f)) { f++; }
+        while (*f && !__png_isspace(*f)) { f++; }
     }
 
     /* data...
      * */
     size_t i = 0,
            j = pnm_w * pnm_h * 4;
-    uint8_t *data = malloc(j * sizeof(uint8_t));
+    uint8_t *data = (uint8_t *) malloc(j * sizeof(uint8_t));
     if (!data) { free(f_ptr); return (0); }
     while (i < j) {
         switch (type) {
             case (PNM_PBM):
             case (PNM_PGM): {
-                while (*f && !__isdigit(*f)) { f++; }
-                uint8_t sample = __atoi(f);
+                while (*f && !__png_isdigit(*f)) { f++; }
+                uint8_t sample = __png_atoi(f);
                 if (sample > maxval) {
                     free(f_ptr);
                     free(data);
 
                     return (0);
                 }
-                while (*f && !__isspace(*f)) { f++; }
+                while (*f && !__png_isspace(*f)) { f++; }
 
                 data[i++] = sample;
                 data[i++] = sample;
@@ -228,8 +228,8 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
 
             case (PNM_PPM): {
                 for (size_t k = 0; k < 3; k++) {
-                    while (*f && !__isdigit(*f)) { f++; }
-                    uint8_t sample = __atoi(f);
+                    while (*f && !__png_isdigit(*f)) { f++; }
+                    uint8_t sample = __png_atoi(f);
                     if (sample > maxval) {
                         free(f_ptr);
                         free(data);
@@ -238,7 +238,7 @@ IMGAPI void *imageLoadPNM(const char *path, int *width, int *height) {
                     }
 
                     data[i++] = sample;
-                    while (*f && !__isspace(*f)) { f++; }
+                    while (*f && !__png_isspace(*f)) { f++; }
                 }
                 data[i++] = 255;
             } break;
@@ -270,12 +270,12 @@ IMGAPI int imageSavePNM(const char *path, const void *data, const int width, con
 
     /* figure-out the file type...
      * */
-    enum e_pnmtype type = { 0 };
-    const char *ext = __memrchr(path, '.', __strlen(path));
+    enum e_pnmtype type = PNM_NONE;
+    const char *ext = (char *) __png_memrchr(path, '.', __png_strlen(path));
     if (!ext) { type = PNM_PPM; } /* if no extension found - default to .ppm */
-    else if (!__strcmp(ext, ".pbm")) { type = PNM_PBM; }
-    else if (!__strcmp(ext, ".pgm")) { type = PNM_PGM; }
-    else if (!__strcmp(ext, ".ppm")) { type = PNM_PPM; }
+    else if (!__png_strcmp(ext, ".pbm")) { type = PNM_PBM; }
+    else if (!__png_strcmp(ext, ".pgm")) { type = PNM_PGM; }
+    else if (!__png_strcmp(ext, ".ppm")) { type = PNM_PPM; }
     else { type = PNM_PPM; } /* if no extension matched - default to .ppm */
 
     /* figure-out maxval...
@@ -345,7 +345,7 @@ static inline char *__pnm_trim(const char *s) {
 
     /* if no comments found, we don't need to perform any comment trimming...
      * */
-    if (!__memchr(s, '#', __strlen(s))) { return ((char *) s); }
+    if (!__png_memchr(s, '#', __png_strlen(s))) { return ((char *) s); }
 
     /* this is gonna be kind of wasteful on time complexity, but whatever:
      * - iterate over string to get the size of if without comment lines
@@ -359,7 +359,7 @@ static inline char *__pnm_trim(const char *s) {
         }
     }
 
-    char *news = calloc(modlen + 1, sizeof(char));
+    char *news = (char *) calloc(modlen + 1, sizeof(char));
     if (!news) { return (0); }
 
     for (size_t i = 0; *s; i++, s++) {
@@ -404,7 +404,7 @@ struct s_ihdr {
 
 static int __png_ihdr(struct s_ihdr *, struct s_chunk *);
 
-static uint8_t *__png_idat(struct s_ihdr *, const uint8_t *, const size_t);
+static uint8_t *__png_idat(struct s_ihdr *, uint8_t *, const size_t);
 
 
 struct s_zlib_cmf {
@@ -427,14 +427,14 @@ struct s_zlib_block_header {
 
 static uint8_t *__png_zlib_inflate(uint8_t *, const size_t);
 
-static uint8_t *__png_zlib_inflate_no_compression(uint8_t **, uint8_t *, const size_t *);
+static uint8_t *__png_zlib_inflate_no_compression(uint8_t **, uint8_t *, size_t *);
 
-static uint8_t *__png_zlib_inflate_fixed_huffman(uint8_t **, uint8_t *, const size_t *);
+static uint8_t *__png_zlib_inflate_fixed_huffman(uint8_t **, uint8_t *, size_t *);
 
-static uint8_t *__png_zlib_inflate_dynamic_huffman(uint8_t **, uint8_t *, const size_t *);
+static uint8_t *__png_zlib_inflate_dynamic_huffman(uint8_t **, uint8_t *, size_t *);
 
 
-IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
+IMGAPI unsigned char *imageLoadPNG(const char *path, int *width, int *height) {
     if (!path)  { return (0); }
     if (!*path) { return (0); }
 
@@ -444,7 +444,7 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
     char *f = 0,
          *f_ptr = 0;
 
-    f = __read(file);
+    f = __png_read(file);
     if (!f) { return (0); }
     fclose(file), file = 0;
     f_ptr = f;
@@ -452,19 +452,19 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
     /* signtaure...
      * */
     
-    if (__memcmp(f, g_sign_png, 8)) { return (0); }
+    if (__png_memcmp(f, g_sign_png, 8)) { return (0); }
     f += 8;
 
     /* file parsing...
      * */
 
-    struct s_ihdr ihdr = { 0 };
-    struct s_chunk chunk = { 0 };
-    while (chunk.type != (uint32_t) __pack32((uint8_t *) "IEND")) {
+    struct s_ihdr ihdr = { };
+    struct s_chunk chunk = { };
+    while (chunk.type != (uint32_t) __png_pack32((uint8_t *) "IEND")) {
         f += __png_chunk(&chunk, f);
 
         /* IHDR: header */
-        if (chunk.type == (uint32_t) __pack32((uint8_t *) "IHDR")) {
+        if (chunk.type == (uint32_t) __png_pack32((uint8_t *) "IHDR")) {
             int result = __png_ihdr(&ihdr, &chunk);
 
             if (!result) {
@@ -474,7 +474,7 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
         }
         
         /* IDAT: data */
-        else if (chunk.type == (uint32_t) __pack32((uint8_t *) "IDAT")) {
+        else if (chunk.type == (uint32_t) __png_pack32((uint8_t *) "IDAT")) {
             uint8_t *result = __png_idat(&ihdr, chunk.data, chunk.length);
 
             if (!result) {
@@ -490,7 +490,7 @@ IMGAPI void *imageLoadPNG(const char *path, int *width, int *height) {
         }
 
         /* IEND: end */
-        else if (chunk.type == (uint32_t) __pack32((uint8_t *) "IEND")) { break; }
+        else if (chunk.type == (uint32_t) __png_pack32((uint8_t *) "IEND")) { break; }
 
         /* OTHER: ancillary */
         else { }
@@ -515,19 +515,19 @@ static int __png_chunk(struct s_chunk *chunk, const char *str) {
     const char *diff = str;
 
     /* extract: length */
-    chunk->length = __pack32((uint8_t *) str);
+    chunk->length = __png_pack32((uint8_t *) str);
     str += 4;
     
     /* extract: type / header */
-    chunk->type = __pack32((uint8_t *) str);
+    chunk->type = __png_pack32((uint8_t *) str);
     str += 4;
 
     /* extract: data */
-    chunk->data = __memdup(str, chunk->length);
+    chunk->data = (uint8_t *) __png_memdup(str, chunk->length);
     str += chunk->length;
     
     /* extract: CRC */
-    chunk->crc = __pack32((uint8_t *) str);
+    chunk->crc = __png_pack32((uint8_t *) str);
     str += 4;
 
     return (str - diff);
@@ -556,12 +556,12 @@ static int __png_ihdr(struct s_ihdr *ihdr, struct s_chunk *chunk) {
     uint8_t *data = chunk->data;
     if (data == 0) { return (0); }
 
-    uint32_t width = __pack32(data); data += 4;
+    uint32_t width = __png_pack32(data); data += 4;
     if (width == 0 ||
         width >= (1u << 24)) { return (0); }
     ihdr->width = width;
 
-    uint32_t height = __pack32(data); data += 4;
+    uint32_t height = __png_pack32(data); data += 4;
     if (height == 0 ||
         height >= (1u << 24)) { return (0); }
     ihdr->height = height;
@@ -599,34 +599,26 @@ static int __png_ihdr(struct s_ihdr *ihdr, struct s_chunk *chunk) {
 }
 
 
-static uint8_t *__png_idat(struct s_ihdr *ihdr, const uint8_t *indata, const size_t insize) {
+static uint8_t *__png_idat(struct s_ihdr *ihdr, uint8_t *indata, const size_t insize) {
     /* null-check...
      * */
     if (!ihdr)   { return (0); }
     if (!indata) { return (0); }
 
     struct s_zlib_cmf cmf = {
-        .cm = *indata,
-        .cinfo = *indata >> 4
+        .cm = (uint8_t) (*indata),
+        .cinfo = (uint8_t) (*indata >> 4)
     };
-    printf("indata: %b\n", *indata);
-    printf("cmf: %b\n", cmf);
-    printf("> cm: %d (%b)\n", cmf.cm, cmf.cm);
-    printf("> cinfo: %d (%b)\n", cmf.cinfo, cmf.cinfo);
 
     indata++;
-
     struct s_zlib_flg flg = {
-        .fcheck = *indata,
-        .fdict = *indata >> 5,
-        .flevel = *indata >> 6
+        .fcheck = (uint8_t) (*indata),
+        .fdict = (uint8_t) (*indata >> 5),
+        .flevel = (uint8_t) (*indata >> 6)
     };
-    printf("indata: %b\n", *indata);
-    printf("flg: %b\n", flg);
-    printf("> fcheck: %d (%b)\n", flg.fcheck, flg.fcheck);
-    printf("> fdict: %d (%b)\n", flg.fdict, flg.fdict);
-    printf("> flevel: %d (%b)\n", flg.flevel, flg.flevel);
 
+    (void) cmf;
+    (void) flg;
     uint8_t *data = __png_zlib_inflate(++indata, insize - 2);
     if (!data) { return (0); }
 
@@ -644,7 +636,7 @@ static uint8_t *__png_zlib_inflate(uint8_t *indata, const size_t insize) {
     uint8_t *outdata = 0;
     size_t   outsize = 0;
 
-    struct s_zlib_block_header block_header = { 0 };
+    struct s_zlib_block_header block_header = { };
     do {
         /* extract the block header from the current byte... */
         block_header.bfinal = *indata, *indata >>= 1;
@@ -672,30 +664,39 @@ static uint8_t *__png_zlib_inflate(uint8_t *indata, const size_t insize) {
     } while (!block_header.bfinal);
     /* iterate over the zlib block until BFINAL isn't set... */
 
+    (void) insize;
     return (outdata);
 }
 
 
-static uint8_t *__png_zlib_inflate_no_compression(uint8_t **src, uint8_t *dst, const size_t *size) {
-    /* TODO: implement */
-
+static uint8_t *__png_zlib_inflate_no_compression(uint8_t **src, uint8_t *dst, size_t *size) {
     uint16_t len  = **src; **src >>= 16;
     uint16_t nlen = **src; **src >>= 16;
 
+    (void) dst;
+    (void) size;
+    (void) len;
+    (void) nlen;
     return (dst);
 }
 
 
-static uint8_t *__png_zlib_inflate_fixed_huffman(uint8_t **src, uint8_t *dst, const size_t *size) {
+static uint8_t *__png_zlib_inflate_fixed_huffman(uint8_t **src, uint8_t *dst, size_t *size) {
     /* TODO: implement */
     
+    (void) src;
+    (void) dst;
+    (void) size;
     return (dst);
 }
 
 
-static uint8_t *__png_zlib_inflate_dynamic_huffman(uint8_t **src, uint8_t *dst, const size_t *size) {
+static uint8_t *__png_zlib_inflate_dynamic_huffman(uint8_t **src, uint8_t *dst, size_t *size) {
     /* TODO: implement */
     
+    (void) src;
+    (void) dst;
+    (void) size;
     return (dst);
 }
 
@@ -706,7 +707,7 @@ static uint8_t *__png_zlib_inflate_dynamic_huffman(uint8_t **src, uint8_t *dst, 
 /* SECTION: static functions
  * */
 
-static inline uint32_t __pack16(uint8_t data[2]) {
+static inline uint32_t __png_pack16(uint8_t data[2]) {
 
 #  if (LITTLE_ENDIAN)
     return (data[1] | (data[0] << 8));
@@ -717,7 +718,7 @@ static inline uint32_t __pack16(uint8_t data[2]) {
 }
 
 
-static inline uint32_t __pack32(uint8_t data[4]) {
+static inline uint32_t __png_pack32(uint8_t data[4]) {
 
 #  if (LITTLE_ENDIAN)
     return (data[3] | (data[2] << 8) | (data[1] << 16) | (data[0] << 24));
@@ -728,7 +729,7 @@ static inline uint32_t __pack32(uint8_t data[4]) {
 }
 
 
-static char *__read(FILE *f) {
+static inline char *__png_read(FILE *f) {
     /* Null-check...
      * */
     if (!f) { return (0); }
@@ -738,7 +739,7 @@ static char *__read(FILE *f) {
     fseek(f, 0, SEEK_SET);
     if (!size) { return (0); }
 
-    char *data = calloc(size + 1, sizeof(char));
+    char *data = (char *) calloc(size + 1, sizeof(char));
     if (!data) { return (0); }
     if (fread(data, sizeof(uint8_t), size, f) != size) { free(data); return (0); }
 
@@ -746,13 +747,13 @@ static char *__read(FILE *f) {
 }
 
 
-static uint32_t __abs(const int32_t i) {
+static inline uint32_t __png_abs(const int32_t i) {
     return (i < 0 ? i * -1 : i);
 }
 
 
-static int __memcmp(const void *s0, const void *s1, size_t n) {
-    const uint8_t *c0 = (uint8_t *) s0,
+static inline int __png_memcmp(const void *s0, const void *s1, size_t n) {
+    uint8_t *c0 = (uint8_t *) s0,
                   *c1 = (uint8_t *) s1;
 
     while (n--) {
@@ -764,7 +765,7 @@ static int __memcmp(const void *s0, const void *s1, size_t n) {
 }
 
 
-static void *__memcpy(void *dst, const void *src, size_t n) {
+static inline void *__png_memcpy(void *dst, const void *src, size_t n) {
     uint8_t *c0 = (uint8_t *) src,
             *c1 = (uint8_t *) dst;
 
@@ -775,22 +776,19 @@ static void *__memcpy(void *dst, const void *src, size_t n) {
 }
 
 
-static void *__memdup(const void *s0, size_t s) {
+static inline void *__png_memdup(const void *s0, size_t s) {
     if (!s0) { return (0); }
     if (!s)  { return (0); }
 
-    uint8_t *c0 = (uint8_t *) s0,
-            *c1 = (uint8_t *) 0;
+    void *s1 = malloc(s);
+    if (!s1) { return (0); }
 
-    c1 = malloc(s);
-    if (!c1) { return (0); }
-
-    return (__memcpy(c1, c0, s));
+    return (__png_memcpy(s1, s0, s));
 }
 
 
-static void *__memchr(const void *s, const unsigned char c, size_t n) {
-    const uint8_t *c0 = (const uint8_t *) s;
+static inline void *__png_memchr(const void *s, const unsigned char c, size_t n) {
+    uint8_t *c0 = (uint8_t *) s;
     if (!c0) { return (0); }
 
     while (n--) {
@@ -801,8 +799,8 @@ static void *__memchr(const void *s, const unsigned char c, size_t n) {
 }
 
 
-static void *__memrchr(const void *s, const unsigned char c, size_t n) {
-    const uint8_t *c0 = (const uint8_t *) s;
+static inline void *__png_memrchr(const void *s, const unsigned char c, size_t n) {
+    uint8_t *c0 = (uint8_t *) s;
     if (!c0) { return (0); }
 
     while (n-- > 0) {
@@ -814,7 +812,7 @@ static void *__memrchr(const void *s, const unsigned char c, size_t n) {
 }
 
 
-static size_t __strlen(const char *s) {
+static inline size_t __png_strlen(const char *s) {
     for (size_t i = 0; s; i++) {
         if (!s[i]) { return (i); }
     }
@@ -822,7 +820,7 @@ static size_t __strlen(const char *s) {
 }
 
 
-static int __strcmp(const char *s0, const char *s1) {
+static inline int __png_strcmp(const char *s0, const char *s1) {
     while (*s0 && *s1 && *s0 == *s1) {
         s0++;
         s1++;
@@ -831,18 +829,18 @@ static int __strcmp(const char *s0, const char *s1) {
 }
 
 
-static int __isspace(int c) {
+static inline int __png_isspace(int c) {
     return ((c >= '\t' && c <= '\r') || c == ' ');
 }
 
 
-static int __isdigit(int c) {
+static inline int __png_isdigit(int c) {
     return (c >= '0' && c <= '9');
 }
 
 
-static int __atoi(const char *str) {
-    while (__isspace(*str)) { str++; }
+static inline int __png_atoi(const char *str) {
+    while (__png_isspace(*str)) { str++; }
 
     int sign = 1;
     if (*str == '+' || *str == '-') {
@@ -853,7 +851,7 @@ static int __atoi(const char *str) {
     }
 
     int value = 0;
-    while (__isdigit(*str)) {
+    while (__png_isdigit(*str)) {
         value *= 10;
         value += (int) (*str - '0');
         str++;
