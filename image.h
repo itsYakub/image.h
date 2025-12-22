@@ -372,8 +372,7 @@ static inline uint8_t  *__pnm_decodea(const char *indata, enum e_pnmtype type, c
             case (PNM_PGM): {
                 while (*indata && !__png_isdigit(*indata)) { indata++; }
                 uint8_t sample = __png_atoi(indata);
-                        sample /= maxval;
-                        sample *= 255;
+                        sample = ((float) sample / (float) maxval) * 255.0;
 
                 outdata[i++] = sample;
                 outdata[i++] = sample;
@@ -387,8 +386,7 @@ static inline uint8_t  *__pnm_decodea(const char *indata, enum e_pnmtype type, c
                 for (size_t k = 0; k < 3; k++) {
                     while (*indata && !__png_isdigit(*indata)) { indata++; }
                     uint8_t sample = __png_atoi(indata);
-                            sample /= maxval;
-                            sample *= 255;
+                            sample = ((float) sample / (float) maxval) * 255.0;
 
                     outdata[i++] = sample;
                     while (*indata && !__png_isspace(*indata)) { indata++; }
@@ -417,8 +415,7 @@ static inline uint8_t  *__pnm_decodeb(const char *indata, enum e_pnmtype type, c
             case (PNM_PBM):
             case (PNM_PGM): {
                 uint8_t sample = (uint8_t) *indata++;
-                        sample /= maxval;
-                        sample *= 255;
+                        sample = ((float) sample / (float) maxval) * 255.0;
 
                 outdata[i++] = sample;
                 outdata[i++] = sample;
@@ -429,8 +426,7 @@ static inline uint8_t  *__pnm_decodeb(const char *indata, enum e_pnmtype type, c
             case (PNM_PPM): {
                 for (size_t k = 0; k < 3; k++) {
                     uint8_t sample = (uint8_t) *indata++;
-                            sample /= maxval;
-                            sample *= 255;
+                            sample = ((float) sample / (float) maxval) * 255.0;
 
                     outdata[i++] = sample;
                 }
