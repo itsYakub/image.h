@@ -126,7 +126,17 @@ enum e_pnmtype {
 
 static inline char *__pnm_trim(const char *); 
 
+static inline uint8_t  *__pnm_decodea(const char *, enum e_pnmtype, const size_t, const size_t, const size_t);
 
+static inline uint8_t  *__pnm_decodeb(const char *, enum e_pnmtype, const size_t, const size_t, const size_t);
+
+
+/* TODO:
+ * - New additions have probably brought more bugs for PBM and PGM decoding.
+ *   Find and resolve those bugs (especially for PBM decoding).
+ *   For that find more test cases (especially in binary formats).
+ * - Add more error checks...
+ * */
 IMGAPI unsigned char *imageLoadPNM(const char *path, int *width, int *height) {
     if (!path)  { return (0); }
     if (!*path) { return (0); }
@@ -153,23 +163,36 @@ IMGAPI unsigned char *imageLoadPNM(const char *path, int *width, int *height) {
 
     /* magic...
      * */
+    int is_binary = 0;
     enum e_pnmtype type = PNM_NONE;
     while (__png_isspace(*f)) { f++; }
     if (*f++ != 'P') { return (0); }
     switch (*f++) {
-        case ('1'):
+        case ('1'): {
+            type = PNM_PBM;
+            is_binary = 0;
+        } break;
         case ('4'): {
             type = PNM_PBM;
+            is_binary = 1;
         } break;
         
-        case ('2'):
+        case ('2'): {
+            type = PNM_PGM;
+            is_binary = 0;
+        } break;
         case ('5'): {
             type = PNM_PGM;
+            is_binary = 1;
         } break;
         
-        case ('3'):
+        case ('3'): {
+            type = PNM_PPM;
+            is_binary = 0;
+        } break;
         case ('6'): {
             type = PNM_PPM;
+            is_binary = 1;
         } break;
         
         default: { return (0); }
@@ -202,50 +225,10 @@ IMGAPI unsigned char *imageLoadPNM(const char *path, int *width, int *height) {
 
     /* data...
      * */
-    size_t i = 0,
-           j = pnm_w * pnm_h * 4;
-    uint8_t *data = (uint8_t *) malloc(j * sizeof(uint8_t));
+    uint8_t *data = !is_binary ?
+        __pnm_decodea(f, type, pnm_w, pnm_h, maxval) :
+        __pnm_decodeb(++f, type, pnm_w, pnm_h, maxval);
     if (!data) { free(f_ptr); return (0); }
-    while (i < j) {
-        switch (type) {
-            case (PNM_PBM):
-            case (PNM_PGM): {
-                while (*f && !__png_isdigit(*f)) { f++; }
-                uint8_t sample = __png_atoi(f);
-                if (sample > maxval) {
-                    free(f_ptr);
-                    free(data);
-
-                    return (0);
-                }
-                while (*f && !__png_isspace(*f)) { f++; }
-
-                data[i++] = sample;
-                data[i++] = sample;
-                data[i++] = sample;
-                data[i++] = 255;
-            } break;
-
-            case (PNM_PPM): {
-                for (size_t k = 0; k < 3; k++) {
-                    while (*f && !__png_isdigit(*f)) { f++; }
-                    uint8_t sample = __png_atoi(f);
-                    if (sample > maxval) {
-                        free(f_ptr);
-                        free(data);
-
-                        return (0);
-                    }
-
-                    data[i++] = sample;
-                    while (*f && !__png_isspace(*f)) { f++; }
-                }
-                data[i++] = 255;
-            } break;
-
-            default: { } break;
-        } 
-    }
 
     free(f_ptr);
     if (width)  { *width  = pnm_w; }
@@ -294,10 +277,12 @@ IMGAPI int imageSavePNM(const char *path, const void *data, const int width, con
     FILE *f = fopen(path, "wb");
     if (!f) { return (0); }
 
+    /* for simplicity I'll only create binary PNM's...
+     * */
     switch (type) {
-        case (PNM_PBM): { fprintf(f, "P1\n"); } break;
-        case (PNM_PGM): { fprintf(f, "P2\n"); } break;
-        case (PNM_PPM): { fprintf(f, "P3\n"); } break;
+        case (PNM_PBM): { fprintf(f, "P4\n"); } break;
+        case (PNM_PGM): { fprintf(f, "P5\n"); } break;
+        case (PNM_PPM): { fprintf(f, "P6\n"); } break;
         default: { return (0); }
     }
 
@@ -309,7 +294,7 @@ IMGAPI int imageSavePNM(const char *path, const void *data, const int width, con
     switch (type) {
         case (PNM_PBM): {
             for (size_t i = 0; i < s; i += 4) {
-                fprintf(f, "%d ", d[i] > 0 ? 1 : 0);
+                fputc(d[i] > 0 ? 1 : 0, f);
             }
         } break;
 
@@ -317,15 +302,15 @@ IMGAPI int imageSavePNM(const char *path, const void *data, const int width, con
             for (size_t i = 0; i < s; i += 4) {
                 uint8_t sample = (d[i] + d[i + 1] + d[i + 2]) / 3;
 
-                fprintf(f, "%d ", sample);
+                fputc(sample, f);
             }
         } break;
 
         case (PNM_PPM): {
             for (size_t i = 0; i < s; i++) {
-                if (i % 4 == 0) { continue; }
-                
-                fprintf(f, "%d ", d[i]);
+                if ((i + 1) % 4 == 0) { continue; }
+        
+                fputc(d[i], f);        
             }
         } break;
 
@@ -373,6 +358,91 @@ static inline char *__pnm_trim(const char *s) {
 }
 
 
+static inline uint8_t  *__pnm_decodea(const char *indata, enum e_pnmtype type, const size_t width, const size_t height, const size_t maxval) {
+    size_t i = 0,
+           j = width * height * 4;
+    uint8_t *outdata = (uint8_t *) malloc(j * sizeof(uint8_t));
+    if (!outdata) {
+        return (0);
+    }
+    
+    while (i < j) {
+        switch (type) {
+            case (PNM_PBM):
+            case (PNM_PGM): {
+                while (*indata && !__png_isdigit(*indata)) { indata++; }
+                uint8_t sample = __png_atoi(indata);
+                        sample /= maxval;
+                        sample *= 255;
+
+                outdata[i++] = sample;
+                outdata[i++] = sample;
+                outdata[i++] = sample;
+                outdata[i++] = 255;
+
+                while (*indata && !__png_isspace(*indata)) { indata++; }
+            } break;
+
+            case (PNM_PPM): {
+                for (size_t k = 0; k < 3; k++) {
+                    while (*indata && !__png_isdigit(*indata)) { indata++; }
+                    uint8_t sample = __png_atoi(indata);
+                            sample /= maxval;
+                            sample *= 255;
+
+                    outdata[i++] = sample;
+                    while (*indata && !__png_isspace(*indata)) { indata++; }
+                }
+                outdata[i++] = 255;
+            } break;
+
+            default: { } break;
+        } 
+    }
+
+    return (outdata);
+}
+
+
+static inline uint8_t  *__pnm_decodeb(const char *indata, enum e_pnmtype type, const size_t width, const size_t height, const size_t maxval) {
+    size_t i = 0,
+           j = width * height * 4;
+    uint8_t *outdata = (uint8_t *) malloc(j * sizeof(uint8_t));
+    if (!outdata) {
+        return (0);
+    }
+    
+    while (i < j) {
+        switch (type) {
+            case (PNM_PBM):
+            case (PNM_PGM): {
+                uint8_t sample = (uint8_t) *indata++;
+                        sample /= maxval;
+                        sample *= 255;
+
+                outdata[i++] = sample;
+                outdata[i++] = sample;
+                outdata[i++] = sample;
+                outdata[i++] = 255;
+            } break;
+
+            case (PNM_PPM): {
+                for (size_t k = 0; k < 3; k++) {
+                    uint8_t sample = (uint8_t) *indata++;
+                            sample /= maxval;
+                            sample *= 255;
+
+                    outdata[i++] = sample;
+                }
+                outdata[i++] = 255;
+            } break;
+
+            default: { } break;
+        } 
+    }
+
+    return (outdata);
+}
 
 
 
